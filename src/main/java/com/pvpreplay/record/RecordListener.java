@@ -58,13 +58,14 @@ public final class RecordListener implements Listener {
             }
             p.getPersistentDataContainer().remove(plugin.viewKey());
         }
+        if (plugin.playback().get(p) == null) com.pvpreplay.play.Hotbar.recover(plugin, p);
     }
 
     @EventHandler
     public void onQuit(PlayerQuitEvent e) {
         Player p = e.getPlayer();
         UUID attacker = plugin.recorder().takeRecentPvpAttacker(p, 15_000L);
-        if (attacker != null && st.autoSaveCombatLog) {
+        if (attacker != null && st.autoSaveCombatLog && !st.combatSession) {
             List<Player> focus = new ArrayList<>();
             focus.add(p);
             Player ap = Bukkit.getPlayer(attacker);
@@ -119,7 +120,7 @@ public final class RecordListener implements Listener {
         }
         plugin.recorder().onDeath(victim, msg);
 
-        if (st.autoSavePvpDeath) {
+        if (st.autoSavePvpDeath && !st.combatSession) {
             Player killer = victim.getKiller();
             if (killer != null && !killer.equals(victim)) {
                 plugin.service().trigger("PvP: " + killer.getName() + " killed " + victim.getName(),

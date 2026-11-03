@@ -93,6 +93,14 @@ public final class PlaybackSession {
     private final Map<Integer, Object> voiceCh = new HashMap<>();
     private final List<ReplayAnalyzer.Finding> findings;
     private final Map<Integer, List<ReplayAnalyzer.Finding>> findingsAt = new HashMap<>();
+    private static final int EXTRA_BASE = 41;
+    private static final int ALL_SLOTS = 41 + 54;
+    private final Set<Integer> extraSeen = new HashSet<>();
+    private boolean guiExtra = false;
+    private boolean hotbarMode = false;
+    private ItemStack[] savedInv;
+    private boolean origFly, origFlying;
+    private static final double[] SPEEDS = {0.25, 0.5, 1, 2, 4};
     private int guiPid = -1;
     private Inventory gui;
     private boolean guiDirty = false;
@@ -161,7 +169,15 @@ public final class PlaybackSession {
         origLoc = viewer.getLocation();
         origMode = viewer.getGameMode();
         viewer.getPersistentDataContainer().set(plugin.viewKey(), PersistentDataType.STRING, origMode.name());
-        viewer.setGameMode(GameMode.SPECTATOR);
+        hotbarMode = st.hotbarControls;
+        if (hotbarMode) {
+            origFly = viewer.getAllowFlight();
+            origFlying = viewer.isFlying();
+            savedInv = Hotbar.saveInventory(plugin, viewer);
+            enterFreeCam();
+        } else {
+            viewer.setGameMode(GameMode.SPECTATOR);
+        }
 
         applyStartBlocks();
         advanceTo(0, true);
@@ -171,6 +187,7 @@ public final class PlaybackSession {
         ReplayMeta m = replay.meta();
         viewer.sendMessage(Msg.ok("Watching " + m.id() + " - " + m.reason() + " (" + Fmt.time(frames.size()) + ")"));
         viewer.sendMessage(Msg.info("You are a free camera. Use /replay follow <player> to see through someone's eyes (sneak to leave)."));
+        if (hotbarMode) viewer.sendMessage(Msg.info("Use the items in your hotbar to control the replay (left/right click do different things)."));
         sendControls();
         if (!fights.isEmpty()) {
             viewer.sendMessage(Msg.info("Detected " + fights.size() + " fight" + (fights.size() == 1 ? "" : "s")
@@ -183,13 +200,18 @@ public final class PlaybackSession {
         task = null;
         if (viewer.isOnline()) {
             if (gui != null && viewer.getOpenInventory().getTopInventory() == gui) viewer.closeInventory();
-            viewer.setSpectatorTarget(null);
+            clearTarget();
         }
         gui = null;
         despawnAll();
         revertBlocks();
         if (viewer.isOnline()) {
             if (origMode != null) viewer.setGameMode(origMode);
+            if (hotbarMode) {
+                Hotbar.restore(plugin, viewer, savedInv);
+                viewer.setAllowFlight(origFly);
+                viewer.setFlying(origFly && origFlying);
+            }
             if (origLoc != null && origLoc.getWorld() != null) viewer.teleport(origLoc);
             viewer.getPersistentDataContainer().remove(plugin.viewKey());
             if (!silent) viewer.sendMessage(Msg.info("Replay stopped."));
@@ -217,6 +239,7 @@ public final class PlaybackSession {
 
     public void pause() {
         paused = true;
+        refreshHotbar();
     }
 
     public void resume() {
@@ -225,6 +248,7 @@ public final class PlaybackSession {
             ended = false;
         }
         paused = false;
+        refreshHotbar();
     }
 
     public void toggle() {
@@ -234,6 +258,7 @@ public final class PlaybackSession {
 
     public void setSpeed(double s) {
         speed = Math.max(0.1, Math.min(8.0, s));
+        refreshHotbar();
     }
 
     public double speed() {
@@ -296,17 +321,104 @@ public final class PlaybackSession {
 
     public boolean follow(int pid) {
         if (pid < 0 || pid >= replay.players().size()) return false;
+        if (hotbarMode && viewer.getGameMode() != GameMode.SPECTATOR) viewer.setGameMode(GameMode.SPECTATOR);
         followPid = pid;
         attached = null;
         syncAllTags();
+        refreshHotbar();
         return true;
     }
 
     public void freeCam() {
         followPid = -1;
         attached = null;
-        viewer.setSpectatorTarget(null);
+        clearTarget();
+        if (hotbarMode) enterFreeCam();
         syncAllTags();
+    }
+
+    // ------------------------------------------------------- hotbar controls
+
+    public boolean hotbarMode() {
+        return hotbarMode;
+    }
+
+    private void clearTarget() {
+        if (viewer.isOnline() && viewer.getGameMode() == GameMode.SPECTATOR) viewer.setSpectatorTarget(null);
+    }
+
+    private void enterFreeCam() {
+        viewer.setGameMode(GameMode.CREATIVE);
+        viewer.setAllowFlight(true);
+        viewer.setFlying(true);
+        Hotbar.install(plugin, viewer, this);
+    }
+
+    private void refreshHotbar() {
+        if (hotbarMode && task != null && viewer.isOnline() && viewer.getGameMode() == GameMode.CREATIVE) {
+            Hotbar.install(plugin, viewer, this);
+        }
+    }
+
+    /** The player to show an inventory of: the one being followed, otherwise the closest one. */
+    private int targetPid() {
+        if (followPid >= 0) return followPid;
+        int best = -1;
+        double bd = Double.MAX_VALUE;
+        for (Map.Entry<Integer, Entity> en : npcs.entrySet()) {
+            Entity e = en.getValue();
+            if (e == null || !e.isValid() || e.getWorld() != viewer.getWorld()) continue;
+            double d = e.getLocation().distanceSquared(viewer.getLocation());
+            if (d < bd) {
+                bd = d;
+                best = en.getKey();
+            }
+        }
+        return best;
+    }
+
+    /** A click on a hotbar control item. {@code left} = left click, otherwise right click. */
+    public void onControl(String id, boolean left) {
+        switch (id) {
+            case "rewind" -> seekRelativeSeconds(left ? -5 : -10);
+            case "forward" -> seekRelativeSeconds(left ? 5 : 10);
+            case "toggle" -> toggle();
+            case "speed" -> {
+                int idx = 0;
+                for (int i = 0; i < SPEEDS.length; i++) if (Math.abs(SPEEDS[i] - speed) < Math.abs(SPEEDS[idx] - speed)) idx = i;
+                idx = Math.max(0, Math.min(SPEEDS.length - 1, idx + (left ? -1 : 1)));
+                setSpeed(SPEEDS[idx]);
+            }
+            case "fight" -> viewer.sendMessage(Msg.info(jumpFight(left ? -1 : 1)));
+            case "players" -> {
+                int n = replay.players().size();
+                if (n == 0) return;
+                if (left) {
+                    freeCam();
+                    viewer.sendMessage(Msg.info("Free camera."));
+                } else {
+                    int next = (followPid + 1) % n;
+                    follow(next);
+                    viewer.sendMessage(Msg.ok("Following " + nameOf(next) + ". Sneak to go back to free camera."));
+                }
+            }
+            case "inv", "extra" -> {
+                int pid = targetPid();
+                if (pid < 0) {
+                    viewer.sendMessage(Msg.err("Nobody is close by. Follow a player first."));
+                    return;
+                }
+                String err = id.equals("inv") ? openInventory(nameOf(pid)) : openExtraInventory(nameOf(pid));
+                if (err != null) viewer.sendMessage(Msg.err(err));
+            }
+            case "stop" -> {
+                plugin.playback().stop(viewer, false);
+                return;
+            }
+            default -> {
+            }
+        }
+        refreshHotbar();
     }
 
     public void sendControls() {
@@ -326,6 +438,8 @@ public final class PlaybackSession {
                 .append(Msg.button("[Stop]", NamedTextColor.RED, "/replay stop", "Stop watching"));
         Component bar3 = Component.empty()
                 .append(Msg.button("[Inventory]", NamedTextColor.LIGHT_PURPLE, "/replay inv", "See the inventory of the player you follow"))
+                .append(sp())
+                .append(Msg.button("[Extra Inv]", NamedTextColor.DARK_PURPLE, "/replay extrainv", "See the /extrainventory of the player you follow"))
                 .append(sp())
                 .append(Msg.button("[Players]", NamedTextColor.LIGHT_PURPLE, "/replay players", "List everyone in this replay"))
                 .append(sp())
@@ -414,6 +528,7 @@ public final class PlaybackSession {
                 // the viewer pressed sneak: they want their free camera back
                 followPid = -1;
                 attached = null;
+                if (hotbarMode) enterFreeCam();
                 syncAllTags();
             }
             return;
@@ -514,8 +629,28 @@ public final class PlaybackSession {
             return name == null ? "Follow a player first, or use /replay inv <player>." : "'" + name + "' is not in this replay.";
         }
         guiPid = pid;
+        guiExtra = false;
         ReplayInvHolder holder = new ReplayInvHolder();
         gui = Bukkit.createInventory(holder, 45, Component.text(replay.players().get(pid).name() + "'s inventory"));
+        holder.set(gui);
+        fillGui();
+        viewer.openInventory(gui);
+        return null;
+    }
+
+    /** Opens a look-only window with the RankedSMPX /extrainventory of a player as of the current frame. */
+    public String openExtraInventory(String name) {
+        int pid = name == null ? followPid : replay.indexOfName(name);
+        if (pid < 0) {
+            return name == null ? "Follow a player first, or use /replay extrainv <player>." : "'" + name + "' is not in this replay.";
+        }
+        if (!extraSeen.contains(pid)) {
+            return replay.players().get(pid).name() + " has no extra inventory in this replay (none, or RankedSMPX was not running).";
+        }
+        guiPid = pid;
+        guiExtra = true;
+        ReplayInvHolder holder = new ReplayInvHolder();
+        gui = Bukkit.createInventory(holder, 54, Component.text(replay.players().get(pid).name() + "'s extra inventory"));
         holder.set(gui);
         fillGui();
         viewer.openInventory(gui);
@@ -538,7 +673,11 @@ public final class PlaybackSession {
      */
     private void fillGui() {
         guiDirty = false;
-        ItemStack[] a = inv.getOrDefault(guiPid, new ItemStack[41]);
+        ItemStack[] a = inv.getOrDefault(guiPid, new ItemStack[ALL_SLOTS]);
+        if (guiExtra) {
+            for (int i = 0; i < 54; i++) gui.setItem(i, a[EXTRA_BASE + i]);
+            return;
+        }
         gui.setItem(0, a[39]); // helmet
         gui.setItem(1, a[38]); // chestplate
         gui.setItem(2, a[37]); // leggings
@@ -623,8 +762,9 @@ public final class PlaybackSession {
                 if (!quiet) hitSounds(ev);
             }
             case Ev.INV -> {
-                if (ev.b() >= 0 && ev.b() < 41) {
-                    ItemStack[] a = inv.computeIfAbsent(ev.a(), k -> new ItemStack[41]);
+                if (ev.b() >= 0 && ev.b() < ALL_SLOTS) {
+                    ItemStack[] a = inv.computeIfAbsent(ev.a(), k -> new ItemStack[ALL_SLOTS]);
+                    if (ev.b() >= EXTRA_BASE) extraSeen.add(ev.a());
                     a[ev.b()] = decode(ev.data());
                     if (ev.a() == guiPid) guiDirty = true;
                     if (overheadInv) tagDirty.add(ev.a());
@@ -1021,7 +1161,7 @@ public final class PlaybackSession {
     }
 
     private void resetSim() {
-        if (viewer.isOnline()) viewer.setSpectatorTarget(null);
+        if (viewer.isOnline()) clearTarget();
         attached = null;
         despawnAll();
         revertBlocks();

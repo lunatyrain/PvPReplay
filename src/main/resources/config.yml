@@ -46,7 +46,32 @@ storage:
   # 0 = keep forever (until max-replays is hit)
   max-age-days: 14
 
+# Record whole fights using the CombatTag timer. The recording starts when someone is combat tagged and keeps going
+# while anybody is still in combat. After idle-seconds (300 = 5 minutes) without anyone in combat it stops and is saved.
+# This replaces the short automatic saves on PvP death / combat log. Without CombatTag a PvP-hit timer is used.
+combat-session:
+  enabled: true
+  idle-seconds: 300
+  max-seconds: 1800       # safety limit for memory: a fight longer than this is saved and a new recording starts
+  fallback-seconds: 15    # combat length when CombatTag is not installed
+
 playback:
+  # Free camera in creative flight with hotbar items (rewind, pause, forward, speed, fights, players, inventory,
+  # extra inventory, stop). Your own inventory is stored safely and given back when you stop. false = plain spectator.
+  hotbar-controls: true
+  # Optional custom heads for the hotbar items. Paste the "Value" (a long base64 text starting with eyJ...) from a head
+  # on minecraft-heads.com into each line. Empty = normal item. Use /replay reload, then watch a replay again.
+  hotbar-heads:
+    rewind: ""
+    play: ""      # shown while paused (click to play)
+    pause: ""     # shown while playing (click to pause)
+    forward: ""
+    speed: ""
+    fight: ""
+    players: ""
+    inv: ""
+    extra: ""
+    stop: ""
   default-speed: 1.0
   use-skins: true        # show the real skins on the fake players
   hit-feed: true         # chat line for every hit: damage, reach, CPS

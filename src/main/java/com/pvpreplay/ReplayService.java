@@ -85,6 +85,34 @@ public final class ReplayService {
         return true;
     }
 
+    /**
+     * Saves frames from the segment containing {@code startFrame} up to {@code endFrame} (a recorder frame number).
+     * Used by combat sessions. {@code sync} writes on the calling thread (server shutdown).
+     */
+    public void saveRange(String reason, List<PlayerInfo> focus, int startFrame, int endFrame, boolean sync) {
+        Recorder.Snapshot snapshot = recorder.snapshot(startFrame);
+        List<com.pvpreplay.data.Frame> frames = snapshot.frames();
+        int tail = recorder.frameNo() - endFrame;
+        if (tail > 0 && tail < frames.size()) frames = new ArrayList<>(frames.subList(0, frames.size() - tail));
+        if (frames.isEmpty()) return;
+        final List<com.pvpreplay.data.Frame> fr = frames;
+        final String id = store.newId();
+        final long created = System.currentTimeMillis();
+        final String why = reason == null || reason.isBlank() ? "Combat" : reason;
+        Runnable work = () -> {
+            try {
+                Replay r = ReplayCompactor.compact(id, created, why, snapshot.worlds(), snapshot.players(), fr, focus);
+                store.save(r);
+                if (sync) plugin.getLogger().info("Saved replay " + r.meta().id() + " (" + why + ")");
+                else Bukkit.getScheduler().runTask(plugin, () -> announce(r.meta(), null));
+            } catch (Exception e) {
+                plugin.getLogger().log(Level.SEVERE, "Failed to save replay " + id, e);
+            }
+        };
+        if (sync) work.run();
+        else Bukkit.getScheduler().runTaskAsynchronously(plugin, work);
+    }
+
     private void announce(ReplayMeta m, CommandSender requester) {
         plugin.getLogger().info("Saved replay " + m.id() + " (" + m.reason() + ", " + m.seconds() + "s)");
         Component line = Msg.PREFIX

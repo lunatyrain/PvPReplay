@@ -48,6 +48,12 @@ public final class Settings {
     public double reachBad;
     public int cpsWarn;
     public boolean notifyStaff;
+    public boolean hotbarControls;
+    public java.util.Map<String, String> hotbarHeads = new java.util.HashMap<>();
+    public boolean combatSession;
+    public int combatIdleSeconds;
+    public int combatMaxSeconds;
+    public int combatFallbackSeconds;
 
     public void load(FileConfiguration c) {
         bufferSeconds = clamp(c.getInt("recording.buffer-seconds", 60), 20, 300);
@@ -94,6 +100,19 @@ public final class Settings {
         reachBad = c.getDouble("playback.reach-bad", 3.3);
         cpsWarn = c.getInt("playback.cps-warn", 14);
         notifyStaff = c.getBoolean("notify-staff", true);
+        hotbarControls = c.getBoolean("playback.hotbar-controls", true);
+        hotbarHeads = new java.util.HashMap<>();
+        org.bukkit.configuration.ConfigurationSection hs = c.getConfigurationSection("playback.hotbar-heads");
+        if (hs != null) {
+            for (String k : hs.getKeys(false)) {
+                String v = hs.getString(k, "").trim();
+                if (!v.isEmpty()) hotbarHeads.put(k.toLowerCase(Locale.ROOT), v);
+            }
+        }
+        combatSession = c.getBoolean("combat-session.enabled", true);
+        combatIdleSeconds = clamp(c.getInt("combat-session.idle-seconds", 300), 10, 7200);
+        combatMaxSeconds = clamp(c.getInt("combat-session.max-seconds", 1800), 60, 14400);
+        combatFallbackSeconds = clamp(c.getInt("combat-session.fallback-seconds", 15), 1, 600);
     }
 
     private static int clamp(int v, int lo, int hi) {

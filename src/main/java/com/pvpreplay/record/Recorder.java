@@ -58,14 +58,30 @@ public final class Recorder {
     private final Map<Integer, ArrayDeque<Integer>> swings = new HashMap<>();
 
     private static final int INV_SLOTS = 41;
+    private static final int ALL_SLOTS = ExtraInv.BASE + ExtraInv.MAX;
+
+    /** While true the rolling buffer keeps every frame (a combat session is being recorded). */
+    private volatile boolean hold = false;
+    private final Map<UUID, Long> combatAt = new HashMap<>();
+
+    public void setHold(boolean h) {
+        hold = h;
+    }
+
+    /** Fallback combat timer (no CombatTag): was this player in a PvP hit within the last {@code ms}? */
+    public boolean recentCombat(UUID id, long ms) {
+        Long t = combatAt.get(id);
+        return t != null && System.currentTimeMillis() - t <= ms;
+    }
     private static final Set<String> SECRET_COMMANDS = Set.of("login", "l", "log", "register", "reg", "changepassword",
             "password", "passwd", "unregister", "authme", "2fa", "totp", "verify", "auth", "captcha");
     private static final Set<String> PRIVATE_COMMANDS = Set.of("msg", "tell", "w", "whisper", "m", "t", "r", "reply",
             "pm", "dm", "mail");
 
     private static final class InvCache {
-        final ItemStack[] items = new ItemStack[INV_SLOTS];
-        final byte[][] bytes = new byte[INV_SLOTS][];
+        final ItemStack[] items = new ItemStack[ALL_SLOTS];
+        final byte[][] bytes = new byte[ALL_SLOTS][];
+        int extraSize = 0;
         int held = -1;
         int food = -1, level = -1, absorb = -1, satur = -1;
         String effectKey = null;
@@ -175,6 +191,7 @@ public final class Recorder {
         if (gm == GameMode.SPECTATOR) return false;
         if (gm == GameMode.CREATIVE && !st.recordCreative) return false;
         if (p.hasPermission("pvpreplay.exempt")) return false;
+        if (plugin.playback() != null && plugin.playback().isViewing(p)) return false; // staff watching a replay
         return !st.excludedWorlds.contains(p.getWorld().getName().toLowerCase(Locale.ROOT));
     }
 
@@ -251,6 +268,10 @@ public final class Recorder {
                 cps = cps(a);
             }
             if (!attacker.equals(victim)) {
+                long nowMs = System.currentTimeMillis();
+                combatAt.put(victim.getUniqueId(), nowMs);
+                combatAt.put(attacker.getUniqueId(), nowMs);
+                if (combatAt.size() > 500) combatAt.values().removeIf(tm -> nowMs - tm > 600_000L);
                 lastPvpHit.put(victim.getUniqueId(), new PvpHit(attacker.getUniqueId(), System.currentTimeMillis()));
                 if (lastPvpHit.size() > 200) {
                     long old = System.currentTimeMillis() - 60_000L;
@@ -417,7 +438,7 @@ public final class Recorder {
             cur = new Segment(frameNo);
             segments.addLast(cur);
             int maxSegments = (st.bufferSeconds * 20) / SEGMENT + 1;
-            while (segments.size() > maxSegments) segments.removeFirst();
+            while (!hold && segments.size() > maxSegments) segments.removeFirst();
         }
 
         if (st.recordOrbs && (frameNo % 4) == 0) scanOrbs();
@@ -545,29 +566,32 @@ public final class Recorder {
         }
 
         boolean scan = force || ((frameNo + pid) % 5 == 0);
-        if (scan) {
-            for (int i = 0; i < INV_SLOTS; i++) {
-                ItemStack n = inv.getItem(i);
-                if (sameStack(c.items[i], n)) continue;
-                if (isEmpty(n)) {
-                    c.items[i] = null;
+        if (!scan) return;
+        // RankedSMPX /extrainventory lives in replay slots 41..94
+        org.bukkit.inventory.Inventory extra = ExtraInv.of(p.getUniqueId());
+        if (extra != null) c.extraSize = Math.min(ExtraInv.MAX, extra.getSize());
+        int limit = INV_SLOTS + c.extraSize;
+        for (int i = 0; i < limit; i++) {
+            ItemStack n = i < INV_SLOTS ? inv.getItem(i) : (extra == null ? null : extra.getItem(i - INV_SLOTS));
+            if (sameStack(c.items[i], n)) continue;
+            if (isEmpty(n)) {
+                c.items[i] = null;
+                c.bytes[i] = null;
+            } else {
+                c.items[i] = n.clone();
+                try {
+                    c.bytes[i] = n.serializeAsBytes();
+                } catch (Throwable t) {
                     c.bytes[i] = null;
-                } else {
-                    c.items[i] = n.clone();
-                    try {
-                        c.bytes[i] = n.serializeAsBytes();
-                    } catch (Throwable t) {
-                        c.bytes[i] = null;
-                        c.items[i] = null;
-                    }
+                    c.items[i] = null;
                 }
-                // On key frames non-empty slots are emitted below; a slot that just became empty must be emitted here.
-                if (!force || c.bytes[i] == null) evs.add(Ev.inv(pid, i, c.bytes[i]));
             }
+            // On key frames non-empty slots are emitted below; a slot that just became empty must be emitted here.
+            if (!force || c.bytes[i] == null) evs.add(Ev.inv(pid, i, c.bytes[i]));
         }
         if (force) {
-            for (int i = 0; i < INV_SLOTS; i++) {
-                if (emitEmpty || c.bytes[i] != null) evs.add(Ev.inv(pid, i, c.bytes[i]));
+            for (int i = 0; i < limit; i++) {
+                if (emitEmpty || c.bytes[i] != null || i >= INV_SLOTS) evs.add(Ev.inv(pid, i, c.bytes[i]));
             }
         }
     }
