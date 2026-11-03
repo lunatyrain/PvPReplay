@@ -26,12 +26,20 @@ save:
   pre-seconds: 30
   post-seconds: 5
 
+fights:
+  # A fight replay starts at the first player-vs-player hit (with save.pre-seconds before it) and keeps recording
+  # for as long as the fight goes on. It ends when nobody has hit anyone for this many seconds, and is saved if
+  # someone was killed or logged out mid-fight (see auto-save below). The replay stops save.post-seconds after the last hit.
+  idle-seconds: 60
+  # Safety valve. 0 = no limit at all (the default). The whole fight is held in memory until it ends.
+  max-seconds: 0
+
 auto-save:
-  # Save a replay whenever a player is killed by another player.
+  # Save the fight replay (see fights above) when a player is killed by another player.
   on-pvp-death: true
   # Also save when a player logs out within 15 seconds of being hit by another player (combat logging).
   on-combat-log: true
-  # Do not save again for the same victim within this many seconds.
+  # Only used by the combat-log trigger of older versions; fight replays are not rate limited.
   cooldown-seconds: 30
 
 flag:
@@ -46,36 +54,7 @@ storage:
   # 0 = keep forever (until max-replays is hit)
   max-age-days: 14
 
-# Record whole fights using the plugin's own combat timer (no other plugin needed). A player is in combat for
-# combat-seconds after hitting or being hit by another player. Recording starts then and keeps going while anybody is
-# still in combat. After idle-seconds (300 = 5 minutes) without anyone in combat it stops and is saved.
-# This replaces the short automatic saves on PvP death / combat log.
-combat-session:
-  enabled: true
-  idle-seconds: 300
-  max-seconds: 1800       # safety limit for memory: a fight longer than this is saved and a new recording starts
-  # Fights in different areas are saved as separate replays. Players who were never within this many blocks of each
-  # other (and never hit each other) count as different fights. 0 = never split.
-  split-distance: 160
-  combat-seconds: 15      # how long after a PvP hit a player counts as in combat
-
 playback:
-  # Free camera in creative flight with hotbar items (rewind, pause, forward, speed, fights, players, inventory,
-  # extra inventory, stop). Your own inventory is stored safely and given back when you stop. false = plain spectator.
-  hotbar-controls: true
-  # Optional custom heads for the hotbar items. Paste the "Value" (a long base64 text starting with eyJ...) from a head
-  # on minecraft-heads.com into each line. Empty = normal item. Use /replay reload, then watch a replay again.
-  hotbar-heads:
-    rewind: ""
-    play: ""      # shown while paused (click to play)
-    pause: ""     # shown while playing (click to pause)
-    forward: ""
-    speed: ""
-    fight: ""
-    players: ""
-    inv: ""
-    extra: ""
-    stop: ""
   default-speed: 1.0
   use-skins: true        # show the real skins on the fake players
   hit-feed: true         # chat line for every hit: damage, reach, CPS

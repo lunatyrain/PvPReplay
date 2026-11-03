@@ -52,36 +52,28 @@ public final class Recorder {
     private Segment cur;
     private int frameNo = 0;
 
+    // ---- fight tracking: while a fight runs, the buffer is not trimmed from fightFrom onward
+    private int fightFrom = -1;      // first frame to keep, -1 = no fight going on
+    private int fightLastHit = -1;   // frame of the latest player-vs-player hit / kill
+    private boolean fightSave = false;
+    private String fightReason = null;
+    private int fightKills = 0;
+    private final Map<UUID, PlayerInfo> fightFocus = new LinkedHashMap<>();
+
     private final List<Ev> pending = new ArrayList<>();
     private final Map<Integer, ItemStack[]> equipCache = new HashMap<>();
     private Set<Integer> prevPresent = new HashSet<>();
     private final Map<Integer, ArrayDeque<Integer>> swings = new HashMap<>();
 
     private static final int INV_SLOTS = 41;
-    private static final int ALL_SLOTS = ExtraInv.BASE + ExtraInv.MAX;
-
-    /** While true the rolling buffer keeps every frame (a combat session is being recorded). */
-    private volatile boolean hold = false;
-    private final Map<UUID, Long> combatAt = new HashMap<>();
-
-    public void setHold(boolean h) {
-        hold = h;
-    }
-
-    /** Combat timer: was this player in a PvP hit within the last {@code ms}? */
-    public boolean recentCombat(UUID id, long ms) {
-        Long t = combatAt.get(id);
-        return t != null && System.currentTimeMillis() - t <= ms;
-    }
     private static final Set<String> SECRET_COMMANDS = Set.of("login", "l", "log", "register", "reg", "changepassword",
             "password", "passwd", "unregister", "authme", "2fa", "totp", "verify", "auth", "captcha");
     private static final Set<String> PRIVATE_COMMANDS = Set.of("msg", "tell", "w", "whisper", "m", "t", "r", "reply",
             "pm", "dm", "mail");
 
     private static final class InvCache {
-        final ItemStack[] items = new ItemStack[ALL_SLOTS];
-        final byte[][] bytes = new byte[ALL_SLOTS][];
-        int extraSize = 0;
+        final ItemStack[] items = new ItemStack[INV_SLOTS];
+        final byte[][] bytes = new byte[INV_SLOTS][];
         int held = -1;
         int food = -1, level = -1, absorb = -1, satur = -1;
         String effectKey = null;
@@ -191,7 +183,6 @@ public final class Recorder {
         if (gm == GameMode.SPECTATOR) return false;
         if (gm == GameMode.CREATIVE && !st.recordCreative) return false;
         if (p.hasPermission("pvpreplay.exempt")) return false;
-        if (plugin.playback() != null && plugin.playback().isViewing(p)) return false; // staff watching a replay
         return !st.excludedWorlds.contains(p.getWorld().getName().toLowerCase(Locale.ROOT));
     }
 
@@ -268,10 +259,7 @@ public final class Recorder {
                 cps = cps(a);
             }
             if (!attacker.equals(victim)) {
-                long nowMs = System.currentTimeMillis();
-                combatAt.put(victim.getUniqueId(), nowMs);
-                combatAt.put(attacker.getUniqueId(), nowMs);
-                if (combatAt.size() > 500) combatAt.values().removeIf(tm -> nowMs - tm > 600_000L);
+                if (ap >= 0) noteFight(attacker, victim);
                 lastPvpHit.put(victim.getUniqueId(), new PvpHit(attacker.getUniqueId(), System.currentTimeMillis()));
                 if (lastPvpHit.size() > 200) {
                     long old = System.currentTimeMillis() - 60_000L;
@@ -438,8 +426,14 @@ public final class Recorder {
             cur = new Segment(frameNo);
             segments.addLast(cur);
             int maxSegments = (st.bufferSeconds * 20) / SEGMENT + 1;
-            while (!hold && segments.size() > maxSegments) segments.removeFirst();
+            while (segments.size() > maxSegments) {
+                Segment first = segments.peekFirst();
+                // a fight is running: keep everything from its start
+                if (fightFrom >= 0 && first.start + first.frames.size() > fightFrom) break;
+                segments.removeFirst();
+            }
         }
+        checkFightEnd();
 
         if (st.recordOrbs && (frameNo % 4) == 0) scanOrbs();
 
@@ -566,32 +560,29 @@ public final class Recorder {
         }
 
         boolean scan = force || ((frameNo + pid) % 5 == 0);
-        if (!scan) return;
-        // RankedSMPX /extrainventory lives in replay slots 41..94
-        org.bukkit.inventory.Inventory extra = ExtraInv.of(p.getUniqueId());
-        if (extra != null) c.extraSize = Math.min(ExtraInv.MAX, extra.getSize());
-        int limit = INV_SLOTS + c.extraSize;
-        for (int i = 0; i < limit; i++) {
-            ItemStack n = i < INV_SLOTS ? inv.getItem(i) : (extra == null ? null : extra.getItem(i - INV_SLOTS));
-            if (sameStack(c.items[i], n)) continue;
-            if (isEmpty(n)) {
-                c.items[i] = null;
-                c.bytes[i] = null;
-            } else {
-                c.items[i] = n.clone();
-                try {
-                    c.bytes[i] = n.serializeAsBytes();
-                } catch (Throwable t) {
-                    c.bytes[i] = null;
+        if (scan) {
+            for (int i = 0; i < INV_SLOTS; i++) {
+                ItemStack n = inv.getItem(i);
+                if (sameStack(c.items[i], n)) continue;
+                if (isEmpty(n)) {
                     c.items[i] = null;
+                    c.bytes[i] = null;
+                } else {
+                    c.items[i] = n.clone();
+                    try {
+                        c.bytes[i] = n.serializeAsBytes();
+                    } catch (Throwable t) {
+                        c.bytes[i] = null;
+                        c.items[i] = null;
+                    }
                 }
+                // On key frames non-empty slots are emitted below; a slot that just became empty must be emitted here.
+                if (!force || c.bytes[i] == null) evs.add(Ev.inv(pid, i, c.bytes[i]));
             }
-            // On key frames non-empty slots are emitted below; a slot that just became empty must be emitted here.
-            if (!force || c.bytes[i] == null) evs.add(Ev.inv(pid, i, c.bytes[i]));
         }
         if (force) {
-            for (int i = 0; i < limit; i++) {
-                if (emitEmpty || c.bytes[i] != null || i >= INV_SLOTS) evs.add(Ev.inv(pid, i, c.bytes[i]));
+            for (int i = 0; i < INV_SLOTS; i++) {
+                if (emitEmpty || c.bytes[i] != null) evs.add(Ev.inv(pid, i, c.bytes[i]));
             }
         }
     }
@@ -657,6 +648,66 @@ public final class Recorder {
         pending.add(Ev.item(pid, pickup ? 1 : 0, item.getAmount(), item.getType().name()));
     }
 
+    // ----------------------------------------------------------------- fights
+
+    private void noteFight(Player a, Player v) {
+        if (fightFrom < 0) {
+            fightFrom = Math.max(0, frameNo - st.preSeconds * 20);
+            fightSave = false;
+            fightReason = null;
+            fightKills = 0;
+            fightFocus.clear();
+        }
+        fightLastHit = frameNo;
+        fightFocus.putIfAbsent(v.getUniqueId(), new PlayerInfo(v.getUniqueId(), v.getName(), null, null));
+        fightFocus.putIfAbsent(a.getUniqueId(), new PlayerInfo(a.getUniqueId(), a.getName(), null, null));
+    }
+
+    /** A player was killed by another player: this fight is worth saving. */
+    public void fightKill(Player killer, Player victim) {
+        noteFight(killer, victim);
+        fightSave = true;
+        fightKills++;
+        if (fightReason == null) fightReason = "PvP: " + killer.getName() + " killed " + victim.getName();
+    }
+
+    /** A player quit while in a fight: this fight is worth saving. */
+    public void fightCombatLog(Player quitter, Player attacker) {
+        if (attacker != null) noteFight(attacker, quitter);
+        else noteFight(quitter, quitter);
+        fightSave = true;
+        if (fightReason == null) fightReason = "Combat log: " + quitter.getName() + " left during a fight";
+    }
+
+    private void checkFightEnd() {
+        if (fightFrom < 0) return;
+        boolean idle = frameNo - fightLastHit >= st.fightIdleSeconds * 20;
+        boolean tooLong = st.fightMaxSeconds > 0 && frameNo - fightFrom >= st.fightMaxSeconds * 20;
+        if (idle || tooLong) endFight(false);
+    }
+
+    /** Ends the current fight and saves it if it had a kill or a combat log. {@code sync}: write on this thread (shutdown). */
+    private void endFight(boolean sync) {
+        if (fightFrom < 0) return;
+        int from = fightFrom;
+        int to = Math.min(frameNo, fightLastHit + st.postSeconds * 20);
+        boolean save = fightSave;
+        String why = fightReason == null ? "PvP fight" : fightReason + (fightKills > 1 ? " (+" + (fightKills - 1) + " more kills)" : "");
+        List<PlayerInfo> focus = new ArrayList<>(fightFocus.values());
+        fightFrom = -1;
+        fightLastHit = -1;
+        fightSave = false;
+        fightReason = null;
+        fightKills = 0;
+        fightFocus.clear();
+        if (save) plugin.service().saveFight(why, focus, from, to, sync);
+    }
+
+    /** Server shutting down: save a fight that is still going on. */
+    public void flushFight() {
+        endFight(true);
+    }
+
     // -------------------------------------------------------------- snapshot
 
     /**
@@ -664,9 +715,18 @@ public final class Recorder {
      * Call on the main thread. The returned lists contain only immutable objects.
      */
     public Snapshot snapshot(int cutoffFrame) {
+        return snapshot(cutoffFrame, Integer.MAX_VALUE);
+    }
+
+    /** Like {@link #snapshot(int)} but stops after frame {@code endFrame}. */
+    public Snapshot snapshot(int cutoffFrame, int endFrame) {
         List<Frame> out = new ArrayList<>();
         for (Segment s : segments) {
-            if (s.start + s.frames.size() > cutoffFrame) out.addAll(s.frames);
+            if (s.start + s.frames.size() <= cutoffFrame) continue;
+            for (int i = 0; i < s.frames.size(); i++) {
+                if (s.start + i > endFrame) break;
+                out.add(s.frames.get(i));
+            }
         }
         return new Snapshot(out, new ArrayList<>(infos), new ArrayList<>(worlds));
     }

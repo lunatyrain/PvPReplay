@@ -11,6 +11,8 @@ public final class Settings {
     public int bufferSeconds;
     public int preSeconds;
     public int postSeconds;
+    public int fightIdleSeconds;
+    public int fightMaxSeconds;
 
     public boolean autoSavePvpDeath;
     public int autoSaveCooldown;
@@ -48,18 +50,13 @@ public final class Settings {
     public double reachBad;
     public int cpsWarn;
     public boolean notifyStaff;
-    public boolean hotbarControls;
-    public java.util.Map<String, String> hotbarHeads = new java.util.HashMap<>();
-    public boolean combatSession;
-    public int combatIdleSeconds;
-    public int combatMaxSeconds;
-    public int combatSeconds;
-    public int combatSplitDistance;
 
     public void load(FileConfiguration c) {
         bufferSeconds = clamp(c.getInt("recording.buffer-seconds", 60), 20, 300);
         preSeconds = clamp(c.getInt("save.pre-seconds", 30), 5, 240);
         postSeconds = clamp(c.getInt("save.post-seconds", 5), 0, 60);
+        fightIdleSeconds = clamp(c.getInt("fights.idle-seconds", 60), 5, 3600);
+        fightMaxSeconds = clamp(c.getInt("fights.max-seconds", 0), 0, 86400);
         flagPreSeconds = clamp(c.getInt("flag.pre-seconds", 30), 5, 240);
         flagPostSeconds = clamp(c.getInt("flag.post-seconds", 10), 0, 60);
 
@@ -101,20 +98,6 @@ public final class Settings {
         reachBad = c.getDouble("playback.reach-bad", 3.3);
         cpsWarn = c.getInt("playback.cps-warn", 14);
         notifyStaff = c.getBoolean("notify-staff", true);
-        hotbarControls = c.getBoolean("playback.hotbar-controls", true);
-        hotbarHeads = new java.util.HashMap<>();
-        org.bukkit.configuration.ConfigurationSection hs = c.getConfigurationSection("playback.hotbar-heads");
-        if (hs != null) {
-            for (String k : hs.getKeys(false)) {
-                String v = hs.getString(k, "").trim();
-                if (!v.isEmpty()) hotbarHeads.put(k.toLowerCase(Locale.ROOT), v);
-            }
-        }
-        combatSession = c.getBoolean("combat-session.enabled", true);
-        combatIdleSeconds = clamp(c.getInt("combat-session.idle-seconds", 300), 10, 7200);
-        combatMaxSeconds = clamp(c.getInt("combat-session.max-seconds", 1800), 60, 14400);
-        combatSplitDistance = clamp(c.getInt("combat-session.split-distance", 160), 0, 5000);
-        combatSeconds = clamp(c.getInt("combat-session.combat-seconds", 15), 1, 600);
     }
 
     private static int clamp(int v, int lo, int hi) {

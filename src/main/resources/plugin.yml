@@ -2,13 +2,13 @@ name: PvPReplay
 version: '1.0.0'
 main: com.pvpreplay.PvPReplayPlugin
 api-version: '1.21'
-softdepend: [voicechat, RankedSMPX]
+softdepend: [voicechat]
 description: Rolling PvP recorder with in-game playback for reviewing fights and cheating reports.
 author: You
 commands:
   replay:
     description: Save, list and watch PvP replays
-    usage: /replay <help|list|play|info|flags|follow|inv|extrainv|session|invtag|sounds|voice|pause|resume|seek|speed|fight|stop|save|flag|delete|deleteold|reload>
+    usage: /replay <help|list|play|info|flags|follow|invtag|sounds|voice|pause|resume|seek|speed|fight|stop|save|flag|delete|deleteold|reload>
     aliases: [pvpreplay, preplay]
 permissions:
   pvpreplay.view:

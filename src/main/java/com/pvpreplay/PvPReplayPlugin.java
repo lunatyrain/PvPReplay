@@ -22,9 +22,6 @@ public final class PvPReplayPlugin extends JavaPlugin {
     private PlaybackManager playback;
     private NamespacedKey viewKey;
     private VoiceBridge voice;
-    private NamespacedKey ctlKey;
-    private NamespacedKey invKey;
-    private com.pvpreplay.record.CombatSessions sessions;
 
     @Override
     public void onEnable() {
@@ -32,8 +29,6 @@ public final class PvPReplayPlugin extends JavaPlugin {
         settings = new Settings();
         settings.load(getConfig());
         viewKey = new NamespacedKey(this, "viewing");
-        ctlKey = new NamespacedKey(this, "ctl");
-        invKey = new NamespacedKey(this, "viewinv");
 
         store = new ReplayStore(this, settings);
         recorder = new Recorder(this, settings);
@@ -42,7 +37,6 @@ public final class PvPReplayPlugin extends JavaPlugin {
 
         getServer().getPluginManager().registerEvents(new RecordListener(this), this);
         getServer().getPluginManager().registerEvents(new InvGuiListener(), this);
-        getServer().getPluginManager().registerEvents(new com.pvpreplay.play.HotbarListener(this), this);
         ReplayEntityGuard guard = new ReplayEntityGuard(this);
         getServer().getPluginManager().registerEvents(guard, this);
         guard.registerOrbGuards();
@@ -53,8 +47,6 @@ public final class PvPReplayPlugin extends JavaPlugin {
         }
 
         recorder.start();
-        sessions = new com.pvpreplay.record.CombatSessions(this, settings, recorder);
-        sessions.start();
         setupVoice();
 
         // Index existing replays and clean up old ones without blocking the main thread.
@@ -78,8 +70,10 @@ public final class PvPReplayPlugin extends JavaPlugin {
     @Override
     public void onDisable() {
         if (playback != null) playback.stopAll();
-        if (sessions != null) sessions.stop();
-        if (recorder != null) recorder.stop();
+        if (recorder != null) {
+            recorder.flushFight();
+            recorder.stop();
+        }
     }
 
     /** Hooks into Simple Voice Chat if it is installed. Done by reflection so the plugin loads fine without it. */
@@ -119,18 +113,6 @@ public final class PvPReplayPlugin extends JavaPlugin {
 
     public PlaybackManager playback() {
         return playback;
-    }
-
-    public NamespacedKey ctlKey() {
-        return ctlKey;
-    }
-
-    public NamespacedKey invKey() {
-        return invKey;
-    }
-
-    public com.pvpreplay.record.CombatSessions sessions() {
-        return sessions;
     }
 
     public NamespacedKey viewKey() {

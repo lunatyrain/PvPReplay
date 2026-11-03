@@ -27,6 +27,11 @@ import org.bukkit.inventory.EntityEquipment;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.inventory.meta.SkullMeta;
+import com.destroystokyo.paper.profile.PlayerProfile;
+import com.destroystokyo.paper.profile.ProfileProperty;
+import org.bukkit.util.Vector;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.scheduler.BukkitTask;
 
@@ -93,17 +98,12 @@ public final class PlaybackSession {
     private final Map<Integer, Object> voiceCh = new HashMap<>();
     private final List<ReplayAnalyzer.Finding> findings;
     private final Map<Integer, List<ReplayAnalyzer.Finding>> findingsAt = new HashMap<>();
-    private static final int EXTRA_BASE = 41;
-    private static final int ALL_SLOTS = 41 + 54;
-    private final Set<Integer> extraSeen = new HashSet<>();
-    private boolean guiExtra = false;
-    private boolean hotbarMode = false;
-    private ItemStack[] savedInv;
-    private boolean origFly, origFlying;
-    private static final double[] SPEEDS = {0.25, 0.5, 1, 2, 4};
     private int guiPid = -1;
     private Inventory gui;
     private boolean guiDirty = false;
+    private Inventory playersMenu;
+    private ReplayPlayersHolder playersHolder;
+    private final Map<Integer, ItemStack> headCache = new HashMap<>();
 
     private BukkitTask task;
     private Location origLoc;
@@ -169,15 +169,7 @@ public final class PlaybackSession {
         origLoc = viewer.getLocation();
         origMode = viewer.getGameMode();
         viewer.getPersistentDataContainer().set(plugin.viewKey(), PersistentDataType.STRING, origMode.name());
-        hotbarMode = st.hotbarControls;
-        if (hotbarMode) {
-            origFly = viewer.getAllowFlight();
-            origFlying = viewer.isFlying();
-            savedInv = Hotbar.saveInventory(plugin, viewer);
-            enterFreeCam();
-        } else {
-            viewer.setGameMode(GameMode.SPECTATOR);
-        }
+        viewer.setGameMode(GameMode.SPECTATOR);
 
         applyStartBlocks();
         advanceTo(0, true);
@@ -187,7 +179,6 @@ public final class PlaybackSession {
         ReplayMeta m = replay.meta();
         viewer.sendMessage(Msg.ok("Watching " + m.id() + " - " + m.reason() + " (" + Fmt.time(frames.size()) + ")"));
         viewer.sendMessage(Msg.info("You are a free camera. Use /replay follow <player> to see through someone's eyes (sneak to leave)."));
-        if (hotbarMode) viewer.sendMessage(Msg.info("Use the items in your hotbar to control the replay (left/right click do different things)."));
         sendControls();
         if (!fights.isEmpty()) {
             viewer.sendMessage(Msg.info("Detected " + fights.size() + " fight" + (fights.size() == 1 ? "" : "s")
@@ -200,18 +191,16 @@ public final class PlaybackSession {
         task = null;
         if (viewer.isOnline()) {
             if (gui != null && viewer.getOpenInventory().getTopInventory() == gui) viewer.closeInventory();
-            clearTarget();
+            if (playersMenu != null && viewer.getOpenInventory().getTopInventory() == playersMenu) viewer.closeInventory();
+            viewer.setSpectatorTarget(null);
         }
         gui = null;
+        playersMenu = null;
+        playersHolder = null;
         despawnAll();
         revertBlocks();
         if (viewer.isOnline()) {
             if (origMode != null) viewer.setGameMode(origMode);
-            if (hotbarMode) {
-                Hotbar.restore(plugin, viewer, savedInv);
-                viewer.setAllowFlight(origFly);
-                viewer.setFlying(origFly && origFlying);
-            }
             if (origLoc != null && origLoc.getWorld() != null) viewer.teleport(origLoc);
             viewer.getPersistentDataContainer().remove(plugin.viewKey());
             if (!silent) viewer.sendMessage(Msg.info("Replay stopped."));
@@ -239,7 +228,6 @@ public final class PlaybackSession {
 
     public void pause() {
         paused = true;
-        refreshHotbar();
     }
 
     public void resume() {
@@ -248,7 +236,6 @@ public final class PlaybackSession {
             ended = false;
         }
         paused = false;
-        refreshHotbar();
     }
 
     public void toggle() {
@@ -258,7 +245,6 @@ public final class PlaybackSession {
 
     public void setSpeed(double s) {
         speed = Math.max(0.1, Math.min(8.0, s));
-        refreshHotbar();
     }
 
     public double speed() {
@@ -321,104 +307,17 @@ public final class PlaybackSession {
 
     public boolean follow(int pid) {
         if (pid < 0 || pid >= replay.players().size()) return false;
-        if (hotbarMode && viewer.getGameMode() != GameMode.SPECTATOR) viewer.setGameMode(GameMode.SPECTATOR);
         followPid = pid;
         attached = null;
         syncAllTags();
-        refreshHotbar();
         return true;
     }
 
     public void freeCam() {
         followPid = -1;
         attached = null;
-        clearTarget();
-        if (hotbarMode) enterFreeCam();
+        viewer.setSpectatorTarget(null);
         syncAllTags();
-    }
-
-    // ------------------------------------------------------- hotbar controls
-
-    public boolean hotbarMode() {
-        return hotbarMode;
-    }
-
-    private void clearTarget() {
-        if (viewer.isOnline() && viewer.getGameMode() == GameMode.SPECTATOR) viewer.setSpectatorTarget(null);
-    }
-
-    private void enterFreeCam() {
-        viewer.setGameMode(GameMode.CREATIVE);
-        viewer.setAllowFlight(true);
-        viewer.setFlying(true);
-        Hotbar.install(plugin, viewer, this);
-    }
-
-    private void refreshHotbar() {
-        if (hotbarMode && task != null && viewer.isOnline() && viewer.getGameMode() == GameMode.CREATIVE) {
-            Hotbar.install(plugin, viewer, this);
-        }
-    }
-
-    /** The player to show an inventory of: the one being followed, otherwise the closest one. */
-    private int targetPid() {
-        if (followPid >= 0) return followPid;
-        int best = -1;
-        double bd = Double.MAX_VALUE;
-        for (Map.Entry<Integer, Entity> en : npcs.entrySet()) {
-            Entity e = en.getValue();
-            if (e == null || !e.isValid() || e.getWorld() != viewer.getWorld()) continue;
-            double d = e.getLocation().distanceSquared(viewer.getLocation());
-            if (d < bd) {
-                bd = d;
-                best = en.getKey();
-            }
-        }
-        return best;
-    }
-
-    /** A click on a hotbar control item. {@code left} = left click, otherwise right click. */
-    public void onControl(String id, boolean left) {
-        switch (id) {
-            case "rewind" -> seekRelativeSeconds(left ? -5 : -10);
-            case "forward" -> seekRelativeSeconds(left ? 5 : 10);
-            case "toggle" -> toggle();
-            case "speed" -> {
-                int idx = 0;
-                for (int i = 0; i < SPEEDS.length; i++) if (Math.abs(SPEEDS[i] - speed) < Math.abs(SPEEDS[idx] - speed)) idx = i;
-                idx = Math.max(0, Math.min(SPEEDS.length - 1, idx + (left ? -1 : 1)));
-                setSpeed(SPEEDS[idx]);
-            }
-            case "fight" -> viewer.sendMessage(Msg.info(jumpFight(left ? -1 : 1)));
-            case "players" -> {
-                int n = replay.players().size();
-                if (n == 0) return;
-                if (left) {
-                    freeCam();
-                    viewer.sendMessage(Msg.info("Free camera."));
-                } else {
-                    int next = (followPid + 1) % n;
-                    follow(next);
-                    viewer.sendMessage(Msg.ok("Following " + nameOf(next) + ". Sneak to go back to free camera."));
-                }
-            }
-            case "inv", "extra" -> {
-                int pid = targetPid();
-                if (pid < 0) {
-                    viewer.sendMessage(Msg.err("Nobody is close by. Follow a player first."));
-                    return;
-                }
-                String err = id.equals("inv") ? openInventory(nameOf(pid)) : openExtraInventory(nameOf(pid));
-                if (err != null) viewer.sendMessage(Msg.err(err));
-            }
-            case "stop" -> {
-                plugin.playback().stop(viewer, false);
-                return;
-            }
-            default -> {
-            }
-        }
-        refreshHotbar();
     }
 
     public void sendControls() {
@@ -439,9 +338,7 @@ public final class PlaybackSession {
         Component bar3 = Component.empty()
                 .append(Msg.button("[Inventory]", NamedTextColor.LIGHT_PURPLE, "/replay inv", "See the inventory of the player you follow"))
                 .append(sp())
-                .append(Msg.button("[Extra Inv]", NamedTextColor.DARK_PURPLE, "/replay extrainv", "See the /extrainventory of the player you follow"))
-                .append(sp())
-                .append(Msg.button("[Players]", NamedTextColor.LIGHT_PURPLE, "/replay players", "List everyone in this replay"))
+                .append(Msg.button("[Players]", NamedTextColor.LIGHT_PURPLE, "/replay players", "Open the player menu (click a head to teleport)"))
                 .append(sp())
                 .append(Msg.button("[Free cam]", NamedTextColor.GRAY, "/replay follow", "Leave first person"))
                 .append(sp())
@@ -483,6 +380,7 @@ public final class PlaybackSession {
         handleFollow();
         refreshTags();
         updateGui();
+        updatePlayersMenu();
         tickCount++;
         if ((tickCount % 40) == 0) resendBlocks();
         if (st.actionBar && (tickCount & 1) == 0) hud();
@@ -528,7 +426,6 @@ public final class PlaybackSession {
                 // the viewer pressed sneak: they want their free camera back
                 followPid = -1;
                 attached = null;
-                if (hotbarMode) enterFreeCam();
                 syncAllTags();
             }
             return;
@@ -622,6 +519,111 @@ public final class PlaybackSession {
         }
     }
 
+    // ------------------------------------------------------------ players menu
+
+    /** Opens the player menu: one head per person in the replay, click a head to teleport next to them. */
+    public void openPlayersMenu() {
+        int n = Math.min(54, replay.players().size());
+        int rows = Math.max(1, (n + 8) / 9);
+        playersHolder = new ReplayPlayersHolder(this, rows * 9);
+        playersMenu = Bukkit.createInventory(playersHolder, rows * 9, Component.text("Players - click to teleport"));
+        playersHolder.set(playersMenu);
+        for (int pid = 0; pid < n; pid++) playersHolder.bind(pid, pid);
+        fillPlayersMenu();
+        viewer.openInventory(playersMenu);
+    }
+
+    private void updatePlayersMenu() {
+        if (playersMenu == null) return;
+        if (viewer.getOpenInventory().getTopInventory() != playersMenu) {
+            playersMenu = null;
+            playersHolder = null;
+            return;
+        }
+        if ((tickCount % 20) == 0) fillPlayersMenu();
+    }
+
+    private void fillPlayersMenu() {
+        for (int slot = 0; slot < playersMenu.getSize(); slot++) {
+            int pid = playersHolder.pidAt(slot);
+            playersMenu.setItem(slot, pid < 0 ? null : playerHead(pid));
+        }
+    }
+
+    /** The player's head (with their recorded skin) and a short status. */
+    private ItemStack playerHead(int pid) {
+        PlayerInfo pi = replay.players().get(pid);
+        ItemStack base = headCache.get(pid);
+        if (base == null) {
+            base = new ItemStack(Material.PLAYER_HEAD);
+            if (base.getItemMeta() instanceof SkullMeta sm) {
+                try {
+                    PlayerProfile prof = Bukkit.createProfile(pi.uuid(), pi.name());
+                    if (pi.hasSkin()) {
+                        prof.setProperty(new ProfileProperty("textures", pi.skinValue(),
+                                pi.skinSignature() == null || pi.skinSignature().isEmpty() ? null : pi.skinSignature()));
+                    }
+                    sm.setPlayerProfile(prof);
+                } catch (RuntimeException ex) {
+                    sm.setOwningPlayer(Bukkit.getOfflinePlayer(pi.uuid()));
+                }
+                base.setItemMeta(sm);
+            }
+            headCache.put(pid, base);
+        }
+        ItemStack it = base.clone();
+        ItemMeta meta = it.getItemMeta();
+        PState s = lastStates.get(pid);
+        meta.displayName(Component.text(pi.name(), s != null ? NamedTextColor.AQUA : NamedTextColor.DARK_GRAY)
+                .decoration(net.kyori.adventure.text.format.TextDecoration.ITALIC, false));
+        List<Component> lore = new ArrayList<>();
+        if (s != null) {
+            lore.add(Component.text("HP " + Fmt.num1(s.health()) + "   Ping " + s.ping() + "ms", NamedTextColor.GRAY)
+                    .decoration(net.kyori.adventure.text.format.TextDecoration.ITALIC, false));
+            lore.add(Component.text("Click to teleport", NamedTextColor.GREEN)
+                    .decoration(net.kyori.adventure.text.format.TextDecoration.ITALIC, false));
+        } else {
+            lore.add(Component.text("Not here right now", NamedTextColor.RED)
+                    .decoration(net.kyori.adventure.text.format.TextDecoration.ITALIC, false));
+        }
+        meta.lore(lore);
+        it.setItemMeta(meta);
+        return it;
+    }
+
+    /** Called by the menu listener on a click. The real work runs next tick (never close a window inside its click event). */
+    void menuClick(int slot) {
+        if (playersHolder == null) return;
+        int pid = playersHolder.pidAt(slot);
+        if (pid < 0) return;
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            if (!viewer.isOnline()) return;
+            String err = teleportTo(pid);
+            if (err != null) {
+                viewer.sendMessage(Msg.err(err));
+            } else {
+                viewer.closeInventory();
+                viewer.sendMessage(Msg.ok("Teleported to " + nameOf(pid) + "."));
+            }
+        });
+    }
+
+    /** Puts the free camera a few blocks behind and above a player, looking at them. Returns an error or null. */
+    public String teleportTo(int pid) {
+        if (pid < 0 || pid >= replay.players().size()) return "Unknown player.";
+        PState s = lastStates.get(pid);
+        if (s == null) return nameOf(pid) + " is not in the replay right now.";
+        World w = world(s.world());
+        if (w == null) return "That world is not loaded.";
+        freeCam();
+        Location at = new Location(w, s.x(), s.y(), s.z(), s.yaw(), 0f);
+        Vector back = at.getDirection().multiply(-3.0);
+        at.add(back).add(0, 2.0, 0);
+        at.setPitch(30f);
+        viewer.teleport(at);
+        return null;
+    }
+
     /** Opens a look-only window with the inventory of a player as of the current frame. Returns an error or null. */
     public String openInventory(String name) {
         int pid = name == null ? followPid : replay.indexOfName(name);
@@ -629,28 +631,8 @@ public final class PlaybackSession {
             return name == null ? "Follow a player first, or use /replay inv <player>." : "'" + name + "' is not in this replay.";
         }
         guiPid = pid;
-        guiExtra = false;
         ReplayInvHolder holder = new ReplayInvHolder();
         gui = Bukkit.createInventory(holder, 45, Component.text(replay.players().get(pid).name() + "'s inventory"));
-        holder.set(gui);
-        fillGui();
-        viewer.openInventory(gui);
-        return null;
-    }
-
-    /** Opens a look-only window with the RankedSMPX /extrainventory of a player as of the current frame. */
-    public String openExtraInventory(String name) {
-        int pid = name == null ? followPid : replay.indexOfName(name);
-        if (pid < 0) {
-            return name == null ? "Follow a player first, or use /replay extrainv <player>." : "'" + name + "' is not in this replay.";
-        }
-        if (!extraSeen.contains(pid)) {
-            return replay.players().get(pid).name() + " has no extra inventory in this replay (none, or RankedSMPX was not running).";
-        }
-        guiPid = pid;
-        guiExtra = true;
-        ReplayInvHolder holder = new ReplayInvHolder();
-        gui = Bukkit.createInventory(holder, 54, Component.text(replay.players().get(pid).name() + "'s extra inventory"));
         holder.set(gui);
         fillGui();
         viewer.openInventory(gui);
@@ -673,11 +655,7 @@ public final class PlaybackSession {
      */
     private void fillGui() {
         guiDirty = false;
-        ItemStack[] a = inv.getOrDefault(guiPid, new ItemStack[ALL_SLOTS]);
-        if (guiExtra) {
-            for (int i = 0; i < 54; i++) gui.setItem(i, a[EXTRA_BASE + i]);
-            return;
-        }
+        ItemStack[] a = inv.getOrDefault(guiPid, new ItemStack[41]);
         gui.setItem(0, a[39]); // helmet
         gui.setItem(1, a[38]); // chestplate
         gui.setItem(2, a[37]); // leggings
@@ -762,9 +740,8 @@ public final class PlaybackSession {
                 if (!quiet) hitSounds(ev);
             }
             case Ev.INV -> {
-                if (ev.b() >= 0 && ev.b() < ALL_SLOTS) {
-                    ItemStack[] a = inv.computeIfAbsent(ev.a(), k -> new ItemStack[ALL_SLOTS]);
-                    if (ev.b() >= EXTRA_BASE) extraSeen.add(ev.a());
+                if (ev.b() >= 0 && ev.b() < 41) {
+                    ItemStack[] a = inv.computeIfAbsent(ev.a(), k -> new ItemStack[41]);
                     a[ev.b()] = decode(ev.data());
                     if (ev.a() == guiPid) guiDirty = true;
                     if (overheadInv) tagDirty.add(ev.a());
@@ -1161,7 +1138,7 @@ public final class PlaybackSession {
     }
 
     private void resetSim() {
-        if (viewer.isOnline()) clearTarget();
+        if (viewer.isOnline()) viewer.setSpectatorTarget(null);
         attached = null;
         despawnAll();
         revertBlocks();

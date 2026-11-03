@@ -58,20 +58,14 @@ public final class RecordListener implements Listener {
             }
             p.getPersistentDataContainer().remove(plugin.viewKey());
         }
-        if (plugin.playback().get(p) == null) com.pvpreplay.play.Hotbar.recover(plugin, p);
     }
 
     @EventHandler
     public void onQuit(PlayerQuitEvent e) {
         Player p = e.getPlayer();
         UUID attacker = plugin.recorder().takeRecentPvpAttacker(p, 15_000L);
-        if (attacker != null && st.autoSaveCombatLog && !st.combatSession) {
-            List<Player> focus = new ArrayList<>();
-            focus.add(p);
-            Player ap = Bukkit.getPlayer(attacker);
-            if (ap != null) focus.add(ap);
-            plugin.service().trigger("Combat log: " + p.getName() + " left during a fight", focus,
-                    st.preSeconds, st.postSeconds, "combatlog:" + p.getUniqueId(), st.autoSaveCooldown, null);
+        if (attacker != null && st.autoSaveCombatLog) {
+            plugin.recorder().fightCombatLog(p, Bukkit.getPlayer(attacker));
         }
         plugin.playback().stop(p, true);
     }
@@ -120,12 +114,10 @@ public final class RecordListener implements Listener {
         }
         plugin.recorder().onDeath(victim, msg);
 
-        if (st.autoSavePvpDeath && !st.combatSession) {
+        if (st.autoSavePvpDeath) {
             Player killer = victim.getKiller();
             if (killer != null && !killer.equals(victim)) {
-                plugin.service().trigger("PvP: " + killer.getName() + " killed " + victim.getName(),
-                        List.of(victim, killer), st.preSeconds, st.postSeconds,
-                        "death:" + victim.getUniqueId(), st.autoSaveCooldown, null);
+                plugin.recorder().fightKill(killer, victim);
             }
         }
     }

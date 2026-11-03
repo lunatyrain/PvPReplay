@@ -96,27 +96,14 @@ public final class ReplayCommand implements CommandExecutor, TabCompleter {
             });
             case "controls" -> withSession(s, PlaybackSession::sendControls);
             case "flags", "sus", "suspicious" -> withSession(s, PlaybackSession::sendFlags);
-            case "players" -> withSession(s, PlaybackSession::sendPlayers);
+            case "players" -> withSession(s, ses -> {
+                if (a.length >= 2 && a[1].equalsIgnoreCase("list")) ses.sendPlayers();
+                else ses.openPlayersMenu();
+            });
             case "inv", "inventory" -> withSession(s, ses -> {
                 String err = ses.openInventory(a.length >= 2 ? a[1] : null);
                 if (err != null) s.sendMessage(Msg.err(err));
             });
-            case "extrainv", "extrainventory", "einv", "ei" -> withSession(s, ses -> {
-                String err = ses.openExtraInventory(a.length >= 2 ? a[1] : null);
-                if (err != null) s.sendMessage(Msg.err(err));
-            });
-            case "session" -> {
-                if (!s.hasPermission("pvpreplay.admin")) {
-                    noPerm(s);
-                    return true;
-                }
-                if (a.length >= 2 && a[1].equalsIgnoreCase("end")) {
-                    s.sendMessage(plugin.sessions().forceEnd() ? Msg.ok("Fight recording ended, saving...") : Msg.err("No fight is being recorded."));
-                } else {
-                    s.sendMessage(Msg.info(plugin.sessions().status()));
-                    s.sendMessage(Msg.info("Use /replay session end to stop and save it now."));
-                }
-            }
             case "invtag", "invtags", "overhead", "tags" -> withSession(s, ses -> {
                 boolean now = ses.toggleOverheadInv(a.length >= 2 ? onOff(a[1]) : null);
                 s.sendMessage(Msg.info("Inventory above heads: " + (now ? "ON" : "OFF")));
@@ -203,7 +190,6 @@ public final class ReplayCommand implements CommandExecutor, TabCompleter {
             help(s, "/replay flags", "While watching: list suspicious moments (click to jump there)");
             help(s, "/replay follow [player]", "See through a player's eyes; no name = free camera");
             help(s, "/replay inv [player]", "Open a player's inventory, food, effects as of right now");
-            help(s, "/replay extrainv [player]", "Open a player's RankedSMPX /extrainventory as of right now");
             help(s, "/replay players", "List everyone in the replay with Follow / Inventory buttons");
             help(s, "/replay invtag [on|off]", "Show everyone's inventory floating above their head (live)");
             help(s, "/replay sounds [on|off]", "Turn the replay sounds on or off");
@@ -564,7 +550,7 @@ public final class ReplayCommand implements CommandExecutor, TabCompleter {
             List<String> subs = new ArrayList<>();
             if (s.hasPermission("pvpreplay.view")) {
                 subs.addAll(List.of("list", "play", "info", "follow", "pause", "resume", "toggle", "seek", "step", "speed",
-                        "fight", "stop", "controls", "flags", "inv", "extrainv", "session", "players", "invtag", "sounds", "voice"));
+                        "fight", "stop", "controls", "flags", "inv", "players", "invtag", "sounds", "voice"));
             }
             if (s.hasPermission("pvpreplay.save")) subs.addAll(List.of("save", "flag"));
             if (s.hasPermission("pvpreplay.admin")) subs.addAll(List.of("delete", "deleteold", "reload"));
