@@ -68,7 +68,7 @@ public final class Recorder {
         hold = h;
     }
 
-    /** Fallback combat timer (no CombatTag): was this player in a PvP hit within the last {@code ms}? */
+    /** Combat timer: was this player in a PvP hit within the last {@code ms}? */
     public boolean recentCombat(UUID id, long ms) {
         Long t = combatAt.get(id);
         return t != null && System.currentTimeMillis() - t <= ms;

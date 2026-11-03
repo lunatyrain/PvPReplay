@@ -10,17 +10,16 @@ import org.bukkit.scheduler.BukkitTask;
 import java.util.*;
 
 /**
- * Records whole fights, driven by the CombatTag timer.
+ * Records whole fights, driven by a built-in combat timer.
  * The first time anybody becomes combat tagged a session starts and the rolling buffer stops discarding old frames.
  * As long as somebody is tagged the session keeps going. When nobody has been in combat for
  * combat-session.idle-seconds (5 minutes by default) the recording stops and is saved.
- * Without CombatTag a built-in timer based on PvP hits is used instead.
+ * Combat is PvP's own timer: a player is in combat for combat-session.combat-seconds after hitting or being hit by another player.
  */
 public final class CombatSessions {
     private final PvPReplayPlugin plugin;
     private final Settings st;
     private final Recorder rec;
-    private final CombatBridge bridge = new CombatBridge();
 
     private boolean active;
     private int startCutoff;
@@ -68,9 +67,7 @@ public final class CombatSessions {
     }
 
     private boolean inCombat(Player p) {
-        Boolean t = bridge.tagged(p);
-        if (t != null) return t;
-        return rec.recentCombat(p.getUniqueId(), st.combatFallbackSeconds * 1000L);
+        return rec.recentCombat(p.getUniqueId(), st.combatSeconds * 1000L);
     }
 
     private void tick() {

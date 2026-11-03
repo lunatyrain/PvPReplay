@@ -46,14 +46,15 @@ storage:
   # 0 = keep forever (until max-replays is hit)
   max-age-days: 14
 
-# Record whole fights using the CombatTag timer. The recording starts when someone is combat tagged and keeps going
-# while anybody is still in combat. After idle-seconds (300 = 5 minutes) without anyone in combat it stops and is saved.
-# This replaces the short automatic saves on PvP death / combat log. Without CombatTag a PvP-hit timer is used.
+# Record whole fights using the plugin's own combat timer (no other plugin needed). A player is in combat for
+# combat-seconds after hitting or being hit by another player. Recording starts then and keeps going while anybody is
+# still in combat. After idle-seconds (300 = 5 minutes) without anyone in combat it stops and is saved.
+# This replaces the short automatic saves on PvP death / combat log.
 combat-session:
   enabled: true
   idle-seconds: 300
   max-seconds: 1800       # safety limit for memory: a fight longer than this is saved and a new recording starts
-  fallback-seconds: 15    # combat length when CombatTag is not installed
+  combat-seconds: 15      # how long after a PvP hit a player counts as in combat
 
 playback:
   # Free camera in creative flight with hotbar items (rewind, pause, forward, speed, fights, players, inventory,
