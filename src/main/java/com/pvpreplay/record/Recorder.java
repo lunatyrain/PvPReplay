@@ -567,7 +567,7 @@ public final class Recorder {
         boolean scan = force || ((frameNo + pid) % 5 == 0);
         if (scan) {
             Inventory ender = st.recordEnderChest ? p.getEnderChest() : null;
-            Inventory extra = st.recordExtraInventory ? ExtraInv.of(p.getUniqueId()) : null;
+            Inventory extra = st.recordExtraInventory ? ExtraInv.of(p) : null;
             for (int i = 0; i < INV_SLOTS; i++) {
                 ItemStack n;
                 if (i < SLOT_ENDER) n = inv.getItem(i);

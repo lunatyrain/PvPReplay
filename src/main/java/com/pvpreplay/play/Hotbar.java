@@ -142,11 +142,17 @@ public final class Hotbar {
     public static boolean backup(PvPReplayPlugin plugin, Player p) {
         Path f = file(plugin, p.getUniqueId());
         try {
-            if (Files.exists(f) && hasControlItems(plugin, p)) return true; // already backed up, still wearing the hotbar
             Files.createDirectories(f.getParent());
+            // Called once per session, when the inventory still holds the player's real items. An older file here is
+            // left over from a failed restore: keep it aside instead of overwriting it.
+            if (Files.exists(f)) {
+                Files.move(f, f.resolveSibling(p.getUniqueId() + ".stale-" + System.currentTimeMillis() + ".dat"));
+            }
             byte[] data = ItemStack.serializeItemsAsBytes(p.getInventory().getContents());
-            Files.write(f, data);
-            if (Files.size(f) != data.length) return false;
+            Path tmp = f.resolveSibling(p.getUniqueId() + ".tmp");
+            Files.write(tmp, data);
+            if (Files.size(tmp) != data.length) return false;
+            Files.move(tmp, f, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
             return true;
         } catch (IOException | RuntimeException e) {
             plugin.getLogger().log(Level.WARNING, "Could not back up the inventory of " + p.getName(), e);

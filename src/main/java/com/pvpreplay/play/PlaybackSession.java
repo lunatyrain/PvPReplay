@@ -113,6 +113,7 @@ public final class PlaybackSession {
     // hotbar mode
     private boolean controlsMode = false;
     private boolean flagsSaved = false;
+    private boolean invBackedUp = false;
     private boolean sAllowFlight, sFlying, sInvulnerable, sInvisible, sCollidable, sCanPickup, sAffectsSpawning, sSleepIgnored;
     private boolean shownPaused = false;
     private double shownSpeed = -1;
@@ -850,9 +851,14 @@ public final class PlaybackSession {
     /** Switch to hotbar mode: adventure mode + flight, with the control hotbar. The real inventory is saved first. */
     public void enterControlsMode() {
         if (controlsMode) return;
-        if (!Hotbar.backup(plugin, viewer)) {
-            viewer.sendMessage(Msg.err("Could not save your inventory, so the hotbar controls are off. Using spectator mode."));
-            return;
+        // Back up only once per session: after noclip mode the inventory is the (empty) control hotbar, and backing
+        // it up again would overwrite the player's real items.
+        if (!invBackedUp) {
+            if (!Hotbar.backup(plugin, viewer)) {
+                viewer.sendMessage(Msg.err("Could not save your inventory, so the hotbar controls are off. Using spectator mode."));
+                return;
+            }
+            invBackedUp = true;
         }
         if (!flagsSaved) {
             flagsSaved = true;
@@ -902,15 +908,23 @@ public final class PlaybackSession {
             viewer.setAllowFlight(sAllowFlight);
             viewer.setFlying(sFlying && sAllowFlight);
             viewer.setInvulnerable(sInvulnerable);
-            viewer.setInvisible(sInvisible);
             viewer.setCollidable(sCollidable);
             viewer.setCanPickupItems(sCanPickup);
             viewer.setAffectsSpawning(sAffectsSpawning);
             viewer.setSleepingIgnored(sSleepIgnored);
             flagsSaved = false;
         }
+        // Always end visible: never restore a saved "invisible" (it could be left over from an earlier session).
+        viewer.setInvisible(false);
         controlsMode = false;
         Hotbar.restore(plugin, viewer);
+        invBackedUp = false;
+        // Teleport / game mode changes can happen after this; make sure the flag is really off a tick later.
+        if (viewer.isOnline() && plugin.isEnabled()) {
+            Bukkit.getScheduler().runTask(plugin, () -> {
+                if (viewer.isOnline() && plugin.playback().get(viewer) == null) viewer.setInvisible(false);
+            });
+        }
     }
 
     /** Keeps the play/pause and speed buttons in step with the real state. */

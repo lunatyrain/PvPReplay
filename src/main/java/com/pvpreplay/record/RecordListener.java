@@ -73,6 +73,7 @@ public final class RecordListener implements Listener {
             plugin.recorder().fightCombatLog(p, Bukkit.getPlayer(attacker));
         }
         plugin.playback().stop(p, true);
+        ExtraInv.forget(p.getUniqueId());
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
