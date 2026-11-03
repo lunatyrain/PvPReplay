@@ -5,6 +5,7 @@ import com.pvpreplay.Compat;
 import com.pvpreplay.PvPReplayPlugin;
 import com.pvpreplay.Settings;
 import com.pvpreplay.data.*;
+import com.pvpreplay.play.NpcFactory;
 import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
@@ -34,6 +35,9 @@ import java.util.*;
 public final class Recorder {
     public static final int SEGMENT = 100; // ticks per segment (5 s)
     private static final int MAX_PROJECTILES = 200;
+    private static final int MAX_ORBS = 100;
+    private static final String ORB = "EXPERIENCE_ORB";
+    private int orbCount = 0;
     private static final Set<String> NOISY_CAUSES =
             Set.of("FIRE_TICK", "POISON", "WITHER", "STARVATION", "DRYOUT", "FREEZE", "CRAMMING", "SUFFOCATION");
 
@@ -100,7 +104,7 @@ public final class Recorder {
         }
     }
 
-    private record Proj(Projectile entity, String type) {
+    private record Proj(Entity entity, String type) {
     }
 
     public Recorder(PvPReplayPlugin plugin, Settings st) {
@@ -361,13 +365,47 @@ public final class Recorder {
     }
 
     public void onProjectile(Projectile pr) {
-        if (!st.recordProjectiles || projs.size() >= MAX_PROJECTILES) return;
+        if (!st.recordProjectiles || projs.size() - orbCount >= MAX_PROJECTILES) return;
         if (!(pr.getShooter() instanceof Player shooter) || trackedPid(shooter) == null) return;
         int id = nextProj++;
         String type = pr.getType().name();
         projs.put(id, new Proj(pr, type));
         projByEntity.put(pr.getUniqueId(), id);
         pending.add(Ev.projSpawn(id, type));
+    }
+
+    // ------------------------------------------------------------ xp orbs
+
+    /**
+     * Starts following experience orbs that are close to a recorded player (orbs only move toward a player inside about
+     * 8 blocks), so playback can show them drifting in and being picked up. Called every few ticks.
+     */
+    private void scanOrbs() {
+        if (orbCount >= MAX_ORBS) return;
+        for (Player p : Bukkit.getOnlinePlayers()) {
+            if (!tracked(p)) continue;
+            for (Entity e : p.getNearbyEntities(9, 9, 9)) {
+                if (!(e instanceof org.bukkit.entity.ExperienceOrb orb) || !orb.isValid()) continue;
+                if (projByEntity.containsKey(orb.getUniqueId()) || NpcFactory.isReplayEntity(plugin, orb)) continue;
+                if (orbCount >= MAX_ORBS) return;
+                int id = nextProj++;
+                String type = ORB + ":" + orb.getExperience();
+                projs.put(id, new Proj(orb, type));
+                projByEntity.put(orb.getUniqueId(), id);
+                pending.add(Ev.projSpawn(id, type));
+                orbCount++;
+            }
+        }
+    }
+
+    /** Is this entity within 12 blocks of a recorded player? */
+    private boolean nearTracked(Entity e) {
+        Location l = e.getLocation();
+        for (Player p : Bukkit.getOnlinePlayers()) {
+            if (p.getWorld() != l.getWorld() || !tracked(p)) continue;
+            if (p.getLocation().distanceSquared(l) <= 144.0) return true;
+        }
+        return false;
     }
 
     // ------------------------------------------------------------------ tick
@@ -381,6 +419,8 @@ public final class Recorder {
             int maxSegments = (st.bufferSeconds * 20) / SEGMENT + 1;
             while (segments.size() > maxSegments) segments.removeFirst();
         }
+
+        if (st.recordOrbs && (frameNo % 4) == 0) scanOrbs();
 
         List<Ev> evs = new ArrayList<>(pending);
         pending.clear();
@@ -429,9 +469,12 @@ public final class Recorder {
             Iterator<Map.Entry<Integer, Proj>> it = projs.entrySet().iterator();
             while (it.hasNext()) {
                 Map.Entry<Integer, Proj> en = it.next();
-                Projectile pr = en.getValue().entity();
-                boolean ended = !pr.isValid() || pr.isDead() || (pr instanceof AbstractArrow aa && aa.isInBlock());
+                Entity pr = en.getValue().entity();
+                boolean orb = en.getValue().type().startsWith(ORB);
+                boolean ended = !pr.isValid() || pr.isDead() || (pr instanceof AbstractArrow aa && aa.isInBlock())
+                        || (orb && !nearTracked(pr));
                 if (ended) {
+                    if (orb) orbCount--;
                     evs.add(Ev.projEnd(en.getKey()));
                     projByEntity.remove(pr.getUniqueId());
                     it.remove();

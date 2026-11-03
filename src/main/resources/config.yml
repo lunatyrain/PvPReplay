@@ -9,6 +9,7 @@ recording:
   exclude-worlds: []
   blocks: true            # record block place/break (shown to the viewer during playback)
   projectiles: true       # record arrows, pearls, tridents, snowballs...
+  xp-orbs: true           # record experience orbs near players (they drift toward a player and are picked up)
   creative-players: true  # record players in creative mode
   chat: true              # record public chat (shown in the replay feed)
   # Record commands players type. Login/register/password commands are always hidden and private messages

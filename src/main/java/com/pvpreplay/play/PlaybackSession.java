@@ -1264,6 +1264,18 @@ public final class PlaybackSession {
 
     private void endSound(String type, Location at) {
         if (at == null) return;
+        if (type.startsWith("EXPERIENCE_ORB")) {
+            // an orb that vanishes right next to a player was picked up
+            for (PState ps : lastStates.values()) {
+                if (world(ps.world()) != at.getWorld()) continue;
+                double dx = ps.x() - at.getX(), dy = ps.y() + 0.9 - at.getY(), dz = ps.z() - at.getZ();
+                if (dx * dx + dy * dy + dz * dz <= 6.25) {
+                    snd(at, "minecraft:entity.experience_orb.pickup", 0.25f, 0.8f + (float) (Math.random() * 0.4));
+                    return;
+                }
+            }
+            return;
+        }
         String key = switch (type) {
             case "ARROW", "SPECTRAL_ARROW", "TRIDENT" -> "minecraft:entity.arrow.hit";
             case "ENDER_PEARL" -> "minecraft:entity.player.teleport";

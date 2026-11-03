@@ -87,7 +87,7 @@ final class InvTagView {
             float x = slotX(slot);
             float y = slotY(slot);
             if (x != x) continue; // not a visible slot
-            items[slot] = NpcFactory.spawnTagItem(plugin, pos, want, tf(x, y, ITEM_Z, ICON, ICON, FLAT), viewer);
+            items[slot] = NpcFactory.spawnTagItem(plugin, pos, want, iconTf(x, y, ITEM_Z, ICON, ICON, FLAT), viewer);
             if (want.getAmount() > 1) {
                 String txt = String.valueOf(want.getAmount());
                 // a digit is 6 font pixels wide (5 + 1 spacing); one font pixel is 1/40 block before scaling
@@ -168,6 +168,16 @@ final class InvTagView {
         int r = rowFromBottom(slot);
         if (r < 0) return Float.NaN;
         return MARGIN + P * (r + 0.5f) + (r >= 1 ? GAP : 0f);
+    }
+
+    /**
+     * An item display shows the front of an item on its -z side, while the panel and the numbers (and this layout) use
+     * +z toward the viewer, so a plain icon is seen from behind: mirrored left-to-right. Turning it half a turn around
+     * the vertical axis (after scaling) shows the front, so swords, tools and blocks look like the inventory screen.
+     */
+    private static Transformation iconTf(float x, float y, float z, float sx, float sy, float sz) {
+        return new Transformation(new Vector3f(x, y, z), new AxisAngle4f((float) Math.PI, 0f, 1f, 0f),
+                new Vector3f(sx, sy, sz), new AxisAngle4f());
     }
 
     private static Transformation tf(float x, float y, float z, float sx, float sy, float sz) {

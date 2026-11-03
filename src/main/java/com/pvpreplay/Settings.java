@@ -26,6 +26,7 @@ public final class Settings {
     public Set<String> excludedWorlds = new HashSet<>();
     public boolean recordBlocks;
     public boolean recordProjectiles;
+    public boolean recordOrbs;
     public boolean recordCreative;
     public boolean recordChat;
     public boolean recordCommands;
@@ -71,6 +72,7 @@ public final class Settings {
         for (String w : c.getStringList("recording.exclude-worlds")) excludedWorlds.add(w.toLowerCase(Locale.ROOT));
         recordBlocks = c.getBoolean("recording.blocks", true);
         recordProjectiles = c.getBoolean("recording.projectiles", true);
+        recordOrbs = c.getBoolean("recording.xp-orbs", true);
         recordCreative = c.getBoolean("recording.creative-players", true);
         recordChat = c.getBoolean("recording.chat", true);
         recordCommands = c.getBoolean("recording.commands", true);

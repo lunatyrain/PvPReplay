@@ -130,6 +130,7 @@ public final class NpcFactory {
     private static Entity spawnRealProjectile(PvPReplayPlugin plugin, Location loc, String type, Player viewer) {
         World w = loc.getWorld();
         if (w == null) return null;
+        if (type != null && type.startsWith("EXPERIENCE_ORB")) return spawnOrb(plugin, loc, type, viewer);
         final EntityType et;
         try {
             et = EntityType.valueOf(type);
@@ -166,12 +167,46 @@ public final class NpcFactory {
         }
     }
 
+    /** A real experience orb ("EXPERIENCE_ORB:value"); its size comes from the recorded value. Harmless, viewer-only. */
+    private static Entity spawnOrb(PvPReplayPlugin plugin, Location loc, String type, Player viewer) {
+        World w = loc.getWorld();
+        if (w == null) return null;
+        int value = 3;
+        int c = type.indexOf(':');
+        if (c >= 0) {
+            try {
+                value = Math.max(1, Integer.parseInt(type.substring(c + 1)));
+            } catch (NumberFormatException ignored) {
+                // keep the default size
+            }
+        }
+        final int xp = value;
+        final NamespacedKey key = tagKey(plugin);
+        try {
+            Entity e = w.spawn(loc, org.bukkit.entity.ExperienceOrb.class, orb -> {
+                orb.setVisibleByDefault(false);
+                orb.setPersistent(false);
+                orb.setInvulnerable(true);
+                orb.setGravity(false);
+                orb.setSilent(true);
+                orb.setExperience(xp);
+                orb.getPersistentDataContainer().set(key, PersistentDataType.BYTE, (byte) 1);
+            });
+            if (e == null) return null;
+            viewer.showEntity(plugin, e);
+            return e;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
     /** Fallback: a small item display used when the real projectile cannot be spawned. */
     private static Entity spawnProjectileItem(PvPReplayPlugin plugin, Location loc, String type, Player viewer) {
         World w = loc.getWorld();
         if (w == null) return null;
         final NamespacedKey key = tagKey(plugin);
-        final ItemStack item = new ItemStack(materialFor(type));
+        final ItemStack item = new ItemStack(type != null && type.startsWith("EXPERIENCE_ORB")
+                ? Material.EXPERIENCE_BOTTLE : materialFor(type));
         ItemDisplay d = w.spawn(loc, ItemDisplay.class, disp -> {
             disp.setItemStack(item);
             disp.setVisibleByDefault(false);

@@ -37,7 +37,9 @@ public final class PvPReplayPlugin extends JavaPlugin {
 
         getServer().getPluginManager().registerEvents(new RecordListener(this), this);
         getServer().getPluginManager().registerEvents(new InvGuiListener(), this);
-        getServer().getPluginManager().registerEvents(new ReplayEntityGuard(this), this);
+        ReplayEntityGuard guard = new ReplayEntityGuard(this);
+        getServer().getPluginManager().registerEvents(guard, this);
+        guard.registerOrbGuards();
         ReplayCommand cmd = new ReplayCommand(this);
         if (getCommand("replay") != null) {
             getCommand("replay").setExecutor(cmd);
