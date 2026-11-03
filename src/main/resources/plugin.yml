@@ -1,0 +1,36 @@
+name: PvPReplay
+version: '1.0.0'
+main: com.pvpreplay.PvPReplayPlugin
+api-version: '1.21'
+softdepend: [voicechat]
+description: Rolling PvP recorder with in-game playback for reviewing fights and cheating reports.
+author: You
+commands:
+  replay:
+    description: Save, list and watch PvP replays
+    usage: /replay <help|list|play|info|flags|follow|invtag|sounds|voice|pause|resume|seek|speed|fight|stop|save|flag|delete|deleteold|reload>
+    aliases: [pvpreplay, preplay]
+permissions:
+  pvpreplay.view:
+    description: Browse and watch replays
+    default: op
+  pvpreplay.save:
+    description: Save replays by hand (/replay save, /replay flag)
+    default: op
+  pvpreplay.notify:
+    description: Get a chat message when a replay is saved automatically
+    default: op
+  pvpreplay.admin:
+    description: Delete replays and reload the config
+    default: op
+  pvpreplay.exempt:
+    description: Players with this are never recorded
+    default: false
+  pvpreplay.*:
+    description: Everything except exempt
+    default: op
+    children:
+      pvpreplay.view: true
+      pvpreplay.save: true
+      pvpreplay.notify: true
+      pvpreplay.admin: true

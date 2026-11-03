@@ -1,0 +1,75 @@
+# PvPReplay - rolling recorder for reviewing PvP fights and cheating reports.
+# Everything is stored on YOUR server in plugins/PvPReplay/replays. No accounts, no cloud.
+
+recording:
+  # How many seconds of every player are kept in memory at all times (20-300).
+  # Must be at least pre + post + 10 below; it is raised automatically if too small.
+  buffer-seconds: 60
+  # Worlds that are never recorded (lowercase not required).
+  exclude-worlds: []
+  blocks: true            # record block place/break (shown to the viewer during playback)
+  projectiles: true       # record arrows, pearls, tridents, snowballs...
+  creative-players: true  # record players in creative mode
+  chat: true              # record public chat (shown in the replay feed)
+  # Record commands players type. Login/register/password commands are always hidden and private messages
+  # (/msg, /tell, /w, /r ...) only show the command name, never the text.
+  commands: true
+  # Needs the Simple Voice Chat plugin. Records what players say (not the text, the audio) so staff can hear it in
+  # a replay. ON by default: make sure your players know they are recorded (rules / consent / local law), or set false.
+  voice: true
+  # Also record players who are inside a private voice-chat group. Off = group chat is never recorded.
+  voice-groups: false
+
+save:
+  # Used by /replay save and automatic PvP death saves.
+  pre-seconds: 30
+  post-seconds: 5
+
+auto-save:
+  # Save a replay whenever a player is killed by another player.
+  on-pvp-death: true
+  # Also save when a player logs out within 15 seconds of being hit by another player (combat logging).
+  on-combat-log: true
+  # Do not save again for the same victim within this many seconds.
+  cooldown-seconds: 30
+
+flag:
+  # Used by /replay flag <player> [reason]; meant to be called by an anticheat's punishment/flag command,
+  # e.g. "replay flag %player% suspicious combat" (works from console).
+  pre-seconds: 30
+  post-seconds: 10
+  cooldown-seconds: 20
+
+storage:
+  max-replays: 200
+  # 0 = keep forever (until max-replays is hit)
+  max-age-days: 14
+
+playback:
+  default-speed: 1.0
+  use-skins: true        # show the real skins on the fake players
+  hit-feed: true         # chat line for every hit: damage, reach, CPS
+  chat-feed: true        # chat lines for chat, commands, item drops and pickups
+  block-highlight: true  # broken blocks shrink away as the real block (no outline). Placed/broken blocks always show for real, with particles and sound
+  # Floating shield in front of blocking players. Off by default: players raise the shield in their hand instead.
+  # It is switched on automatically if this server has no API for raising an item.
+  shield-display: false
+  # Print a warning in the feed at the moment something suspicious happens (long reach, high CPS, hitting without
+  # aiming, crits without jumping, scaffold-like block placing...). /replay flags lists them all.
+  suspicion-feed: true
+  action-bar: true
+  # Play the sounds of the replay (footsteps, jumps, landings, swimming, hits, hurt, death, eating, drinking,
+  # armor, arrows / pearls / potions thrown, item pickups, block place / break). Toggle in-game: /replay sounds
+  sounds: true
+  # Play recorded voice chat (needs Simple Voice Chat on the server and the voice chat mod on your client).
+  # Only plays at normal 1x speed. Toggle in-game: /replay voice
+  voice: true
+  # Show every player's inventory floating above their head. Toggle in-game: /replay invtag
+  overhead-inventory: true
+  # Colour thresholds in the hit feed and /replay info (vanilla survival reach is 3.0).
+  reach-warn: 3.05
+  reach-bad: 3.3
+  cps-warn: 14
+
+# Tell staff with pvpreplay.notify when a replay is saved.
+notify-staff: true
