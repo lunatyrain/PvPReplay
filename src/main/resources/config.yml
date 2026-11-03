@@ -54,6 +54,9 @@ combat-session:
   enabled: true
   idle-seconds: 300
   max-seconds: 1800       # safety limit for memory: a fight longer than this is saved and a new recording starts
+  # Fights in different areas are saved as separate replays. Players who were never within this many blocks of each
+  # other (and never hit each other) count as different fights. 0 = never split.
+  split-distance: 160
   combat-seconds: 15      # how long after a PvP hit a player counts as in combat
 
 playback:

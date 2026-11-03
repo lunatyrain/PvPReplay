@@ -96,17 +96,28 @@ public final class ReplayService {
         if (tail > 0 && tail < frames.size()) frames = new ArrayList<>(frames.subList(0, frames.size() - tail));
         if (frames.isEmpty()) return;
         final List<com.pvpreplay.data.Frame> fr = frames;
-        final String id = store.newId();
         final long created = System.currentTimeMillis();
-        final String why = reason == null || reason.isBlank() ? "Combat" : reason;
+        final String baseReason = reason == null || reason.isBlank() ? "Combat" : reason;
         Runnable work = () -> {
             try {
-                Replay r = ReplayCompactor.compact(id, created, why, snapshot.worlds(), snapshot.players(), fr, focus);
-                store.save(r);
-                if (sync) plugin.getLogger().info("Saved replay " + r.meta().id() + " (" + why + ")");
-                else Bukkit.getScheduler().runTask(plugin, () -> announce(r.meta(), null));
+                // fights in different areas are saved as separate replays
+                List<com.pvpreplay.data.ReplaySplitter.Group> groups = com.pvpreplay.data.ReplaySplitter.split(
+                        fr, snapshot.players(), focus, st.combatSplitDistance);
+                for (com.pvpreplay.data.ReplaySplitter.Group g : groups) {
+                    String why = baseReason;
+                    if (groups.size() > 1) {
+                        List<String> nm = new ArrayList<>();
+                        for (PlayerInfo pi : g.focus()) if (nm.size() < 4) nm.add(pi.name());
+                        why = "Combat: " + String.join(", ", nm) + (g.focus().size() > nm.size() ? " +" + (g.focus().size() - nm.size()) : "");
+                    }
+                    final String id = store.newId();
+                    Replay r = ReplayCompactor.compact(id, created, why, snapshot.worlds(), snapshot.players(), g.frames(), g.focus());
+                    store.save(r);
+                    if (sync) plugin.getLogger().info("Saved replay " + r.meta().id() + " (" + why + ")");
+                    else Bukkit.getScheduler().runTask(plugin, () -> announce(r.meta(), null));
+                }
             } catch (Exception e) {
-                plugin.getLogger().log(Level.SEVERE, "Failed to save replay " + id, e);
+                plugin.getLogger().log(Level.SEVERE, "Failed to save combat replay", e);
             }
         };
         if (sync) work.run();

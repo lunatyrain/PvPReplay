@@ -54,6 +54,7 @@ public final class Settings {
     public int combatIdleSeconds;
     public int combatMaxSeconds;
     public int combatSeconds;
+    public int combatSplitDistance;
 
     public void load(FileConfiguration c) {
         bufferSeconds = clamp(c.getInt("recording.buffer-seconds", 60), 20, 300);
@@ -112,6 +113,7 @@ public final class Settings {
         combatSession = c.getBoolean("combat-session.enabled", true);
         combatIdleSeconds = clamp(c.getInt("combat-session.idle-seconds", 300), 10, 7200);
         combatMaxSeconds = clamp(c.getInt("combat-session.max-seconds", 1800), 60, 14400);
+        combatSplitDistance = clamp(c.getInt("combat-session.split-distance", 160), 0, 5000);
         combatSeconds = clamp(c.getInt("combat-session.combat-seconds", 15), 1, 600);
     }
 
