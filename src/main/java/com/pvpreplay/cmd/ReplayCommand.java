@@ -95,13 +95,24 @@ public final class ReplayCommand implements CommandExecutor, TabCompleter {
                 s.sendMessage(Msg.ok("Following " + ses.replay().players().get(pid).name() + ". Sneak to go back to free camera."));
             });
             case "controls" -> withSession(s, PlaybackSession::sendControls);
+            case "hotbar", "mode" -> withSession(s, ses -> {
+                if (ses.controlsMode()) ses.enterSpectatorMode();
+                else ses.enterControlsMode();
+            });
             case "flags", "sus", "suspicious" -> withSession(s, PlaybackSession::sendFlags);
             case "players" -> withSession(s, ses -> {
                 if (a.length >= 2 && a[1].equalsIgnoreCase("list")) ses.sendPlayers();
                 else ses.openPlayersMenu();
             });
             case "inv", "inventory" -> withSession(s, ses -> {
-                String err = ses.openInventory(a.length >= 2 ? a[1] : null);
+                String first = a.length >= 2 ? a[1] : null;
+                String tab = a.length >= 3 ? a[2] : null;
+                // "/replay inv extra" and "/replay inv ender" work on the player you follow
+                if (first != null && a.length == 2 && isTab(first)) {
+                    tab = first;
+                    first = null;
+                }
+                String err = ses.openInventory(first, tab);
                 if (err != null) s.sendMessage(Msg.err(err));
             });
             case "invtag", "invtags", "overhead", "tags" -> withSession(s, ses -> {
@@ -189,8 +200,9 @@ public final class ReplayCommand implements CommandExecutor, TabCompleter {
             help(s, "/replay info <id>", "Clicks per second, reach, damage and suspicious activity per player");
             help(s, "/replay flags", "While watching: list suspicious moments (click to jump there)");
             help(s, "/replay follow [player]", "See through a player's eyes; no name = free camera");
-            help(s, "/replay inv [player]", "Open a player's inventory, food, effects as of right now");
-            help(s, "/replay players", "List everyone in the replay with Follow / Inventory buttons");
+            help(s, "/replay inv [player] [inv|extra|ender]", "Look inside a player's inventory, RankedSMPX extra inventory or ender chest as of right now");
+            help(s, "/replay hotbar", "Switch between the control hotbar (adventure) and plain spectator mode (noclip)");
+            help(s, "/replay players [list]", "Menu of everyone in the replay (click a head to teleport); 'list' for the chat list");
             help(s, "/replay invtag [on|off]", "Show everyone's inventory floating above their head (live)");
             help(s, "/replay sounds [on|off]", "Turn the replay sounds on or off");
             help(s, "/replay voice [on|off]", "Hear the recorded voice chat (Simple Voice Chat, 1x speed only)");
@@ -550,7 +562,7 @@ public final class ReplayCommand implements CommandExecutor, TabCompleter {
             List<String> subs = new ArrayList<>();
             if (s.hasPermission("pvpreplay.view")) {
                 subs.addAll(List.of("list", "play", "info", "follow", "pause", "resume", "toggle", "seek", "step", "speed",
-                        "fight", "stop", "controls", "flags", "inv", "players", "invtag", "sounds", "voice"));
+                        "fight", "stop", "controls", "hotbar", "flags", "inv", "players", "invtag", "sounds", "voice"));
             }
             if (s.hasPermission("pvpreplay.save")) subs.addAll(List.of("save", "flag"));
             if (s.hasPermission("pvpreplay.admin")) subs.addAll(List.of("delete", "deleteold", "reload"));
@@ -584,6 +596,7 @@ public final class ReplayCommand implements CommandExecutor, TabCompleter {
                     if (s instanceof Player p && plugin.playback().get(p) != null) {
                         for (PlayerInfo pi : plugin.playback().get(p).replay().players()) out.add(pi.name());
                     }
+                    if (!sub.equals("follow")) out.addAll(List.of("extra", "ender"));
                 }
                 default -> {
                 }
@@ -591,6 +604,7 @@ public final class ReplayCommand implements CommandExecutor, TabCompleter {
             return filter(out, a[1]);
         }
         if (a.length == 3 && (sub.equals("deleteold") || sub.equals("purge") || sub.equals("prune"))) return filter(List.of("confirm"), a[2]);
+        if (a.length == 3 && (sub.equals("inv") || sub.equals("inventory"))) return filter(List.of("inv", "extra", "ender"), a[2]);
         if (a.length == 3 && (sub.equals("list") || sub.equals("ls"))) return List.of();
         return List.of();
     }
@@ -600,5 +614,12 @@ public final class ReplayCommand implements CommandExecutor, TabCompleter {
         List<String> out = new ArrayList<>();
         for (String x : in) if (x.toLowerCase(Locale.ROOT).startsWith(p)) out.add(x);
         return out;
+    }
+
+    private static boolean isTab(String s) {
+        return switch (s.toLowerCase(java.util.Locale.ROOT)) {
+            case "extra", "extrainv", "extra-inventory", "rank", "ender", "enderchest", "ender-chest", "echest", "ec" -> true;
+            default -> false;
+        };
     }
 }

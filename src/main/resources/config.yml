@@ -2,6 +2,10 @@
 # Everything is stored on YOUR server in plugins/PvPReplay/replays. No accounts, no cloud.
 
 recording:
+  # Record each player's ender chest, so staff can look inside it while watching.
+  ender-chest: true
+  # Record each player's RankedSMPX extra inventory (/inv). Needs the RankedSMPX plugin; ignored without it.
+  extra-inventory: true
   # How many seconds of every player are kept in memory at all times (20-300).
   # Must be at least pre + post + 10 below; it is raised automatically if too small.
   buffer-seconds: 60
@@ -55,6 +59,10 @@ storage:
   max-age-days: 14
 
 playback:
+  # The viewer gets a hotbar with controls (pause, seek, speed, players, inventories, ...) and flies around in
+  # adventure mode. Their own inventory is saved and given back afterwards. Turn off to watch in plain spectator
+  # mode with chat buttons only. Viewers can switch at any time with /replay hotbar.
+  hotbar-controls: true
   default-speed: 1.0
   use-skins: true        # show the real skins on the fake players
   hit-feed: true         # chat line for every hit: damage, reach, CPS

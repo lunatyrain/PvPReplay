@@ -7,6 +7,7 @@ import com.pvpreplay.Settings;
 import com.pvpreplay.data.*;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
+import net.kyori.adventure.text.format.TextDecoration;
 import net.kyori.adventure.text.format.TextColor;
 import org.bukkit.Bukkit;
 import org.bukkit.Color;
@@ -34,6 +35,7 @@ import com.destroystokyo.paper.profile.ProfileProperty;
 import org.bukkit.util.Vector;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.scheduler.BukkitTask;
+import com.pvpreplay.record.Recorder;
 
 import java.util.*;
 
@@ -104,6 +106,17 @@ public final class PlaybackSession {
     private Inventory playersMenu;
     private ReplayPlayersHolder playersHolder;
     private final Map<Integer, ItemStack> headCache = new HashMap<>();
+    private int guiTab = 0;   // 0 inventory, 1 extra inventory, 2 ender chest
+    private int guiPage = 0;  // extra inventory has up to 54 slots = 2 pages
+    private static final String[] TAB_NAME = {"Inventory", "Extra inventory", "Ender chest"};
+
+    // hotbar mode
+    private boolean controlsMode = false;
+    private boolean flagsSaved = false;
+    private boolean sAllowFlight, sFlying, sInvulnerable, sInvisible, sCollidable, sCanPickup, sAffectsSpawning, sSleepIgnored;
+    private boolean shownPaused = false;
+    private double shownSpeed = -1;
+    private static final double[] SPEEDS = {0.25, 0.5, 1, 2, 4};
 
     private BukkitTask task;
     private Location origLoc;
@@ -175,11 +188,12 @@ public final class PlaybackSession {
         advanceTo(0, true);
         placeViewerAtStart();
         task = Bukkit.getScheduler().runTaskTimer(plugin, this::tick, 1L, 1L);
+        if (st.hotbarControls) enterControlsMode();
 
         ReplayMeta m = replay.meta();
         viewer.sendMessage(Msg.ok("Watching " + m.id() + " - " + m.reason() + " (" + Fmt.time(frames.size()) + ")"));
         viewer.sendMessage(Msg.info("You are a free camera. Use /replay follow <player> to see through someone's eyes (sneak to leave)."));
-        sendControls();
+        if (!controlsMode) sendControls();
         if (!fights.isEmpty()) {
             viewer.sendMessage(Msg.info("Detected " + fights.size() + " fight" + (fights.size() == 1 ? "" : "s")
                     + ". Use the Prev/Next fight buttons to jump between them."));
@@ -192,7 +206,7 @@ public final class PlaybackSession {
         if (viewer.isOnline()) {
             if (gui != null && viewer.getOpenInventory().getTopInventory() == gui) viewer.closeInventory();
             if (playersMenu != null && viewer.getOpenInventory().getTopInventory() == playersMenu) viewer.closeInventory();
-            viewer.setSpectatorTarget(null);
+            clearSpectatorTarget();
         }
         gui = null;
         playersMenu = null;
@@ -200,7 +214,7 @@ public final class PlaybackSession {
         despawnAll();
         revertBlocks();
         if (viewer.isOnline()) {
-            if (origMode != null) viewer.setGameMode(origMode);
+            restoreViewerState();
             if (origLoc != null && origLoc.getWorld() != null) viewer.teleport(origLoc);
             viewer.getPersistentDataContainer().remove(plugin.viewKey());
             if (!silent) viewer.sendMessage(Msg.info("Replay stopped."));
@@ -316,7 +330,7 @@ public final class PlaybackSession {
     public void freeCam() {
         followPid = -1;
         attached = null;
-        viewer.setSpectatorTarget(null);
+        clearSpectatorTarget();
         syncAllTags();
     }
 
@@ -381,9 +395,11 @@ public final class PlaybackSession {
         refreshTags();
         updateGui();
         updatePlayersMenu();
+        refreshHotbar();
         tickCount++;
         if ((tickCount % 40) == 0) resendBlocks();
         if (st.actionBar && (tickCount & 1) == 0) hud();
+        else if (!st.actionBar && (tickCount % 20) == 0 && showNoclipHint()) viewer.sendActionBar(NOCLIP_HINT);
     }
 
     /**
@@ -418,6 +434,10 @@ public final class PlaybackSession {
     }
 
     private void handleFollow() {
+        if (controlsMode) {
+            followControls();
+            return;
+        }
         if (followPid < 0) return;
         Entity e = npcs.get(followPid);
         if (attached != null && !attached.isValid()) attached = null;
@@ -436,6 +456,14 @@ public final class PlaybackSession {
         }
     }
 
+    /** Shown on the action bar while in noclip (spectator) mode, where the hotbar is hidden. */
+    private static final Component NOCLIP_HINT =
+            Component.text("NOCLIP: double-tap sneak for the hotbar", NamedTextColor.LIGHT_PURPLE);
+
+    private boolean showNoclipHint() {
+        return !controlsMode && st.hotbarControls && viewer.getGameMode() == GameMode.SPECTATOR;
+    }
+
     private void hud() {
         Component c = Component.text(paused ? "[PAUSED] " : "[PLAY] ", paused ? NamedTextColor.YELLOW : NamedTextColor.GREEN)
                 .append(Component.text(Fmt.time(Math.max(0, cur)) + " / " + Fmt.time(frames.size()) + "  x"
@@ -448,6 +476,7 @@ public final class PlaybackSession {
         if (!lastHit.isEmpty() && Math.max(0, cur) - lastHitFrame < 100) {
             c = c.append(Component.text("  |  " + lastHit, NamedTextColor.GRAY));
         }
+        if (showNoclipHint()) c = NOCLIP_HINT.append(Component.text("  |  ", NamedTextColor.GRAY)).append(c);
         viewer.sendActionBar(c);
     }
 
@@ -523,10 +552,16 @@ public final class PlaybackSession {
 
     /** Opens the player menu: one head per person in the replay, click a head to teleport next to them. */
     public void openPlayersMenu() {
+        openPlayersMenu(false);
+    }
+
+    /** @param inspect true: clicking a head opens that player's inventory instead of teleporting. */
+    public void openPlayersMenu(boolean inspect) {
         int n = Math.min(54, replay.players().size());
         int rows = Math.max(1, (n + 8) / 9);
-        playersHolder = new ReplayPlayersHolder(this, rows * 9);
-        playersMenu = Bukkit.createInventory(playersHolder, rows * 9, Component.text("Players - click to teleport"));
+        playersHolder = new ReplayPlayersHolder(this, rows * 9, inspect);
+        playersMenu = Bukkit.createInventory(playersHolder, rows * 9,
+                Component.text(inspect ? "Inventories - pick a player" : "Players - click to teleport"));
         playersHolder.set(playersMenu);
         for (int pid = 0; pid < n; pid++) playersHolder.bind(pid, pid);
         fillPlayersMenu();
@@ -580,7 +615,9 @@ public final class PlaybackSession {
         if (s != null) {
             lore.add(Component.text("HP " + Fmt.num1(s.health()) + "   Ping " + s.ping() + "ms", NamedTextColor.GRAY)
                     .decoration(net.kyori.adventure.text.format.TextDecoration.ITALIC, false));
-            lore.add(Component.text("Click to teleport", NamedTextColor.GREEN)
+            boolean inspect = playersHolder != null && playersHolder.inspect();
+            lore.add(Component.text(inspect ? "Click: inventory, extra inventory, ender chest"
+                            : "Left-click: teleport   Right-click: first person", NamedTextColor.GREEN)
                     .decoration(net.kyori.adventure.text.format.TextDecoration.ITALIC, false));
         } else {
             lore.add(Component.text("Not here right now", NamedTextColor.RED)
@@ -592,12 +629,26 @@ public final class PlaybackSession {
     }
 
     /** Called by the menu listener on a click. The real work runs next tick (never close a window inside its click event). */
-    void menuClick(int slot) {
+    void menuClick(int slot, boolean right) {
         if (playersHolder == null) return;
         int pid = playersHolder.pidAt(slot);
         if (pid < 0) return;
+        boolean inspect = playersHolder.inspect();
         Bukkit.getScheduler().runTask(plugin, () -> {
             if (!viewer.isOnline()) return;
+            if (inspect) {
+                openInventoryOf(pid, guiTab, 0);
+                return;
+            }
+            if (right) {
+                if (follow(pid)) {
+                    viewer.closeInventory();
+                    viewer.sendMessage(Msg.ok("Following " + nameOf(pid) + ". Sneak to go back to free camera."));
+                } else {
+                    viewer.sendMessage(Msg.err("Cannot follow " + nameOf(pid) + "."));
+                }
+                return;
+            }
             String err = teleportTo(pid);
             if (err != null) {
                 viewer.sendMessage(Msg.err(err));
@@ -626,17 +677,67 @@ public final class PlaybackSession {
 
     /** Opens a look-only window with the inventory of a player as of the current frame. Returns an error or null. */
     public String openInventory(String name) {
+        return openInventory(name, null);
+    }
+
+    /** @param tab null/"inv", "extra" or "ender" */
+    public String openInventory(String name, String tab) {
         int pid = name == null ? followPid : replay.indexOfName(name);
         if (pid < 0) {
             return name == null ? "Follow a player first, or use /replay inv <player>." : "'" + name + "' is not in this replay.";
         }
-        guiPid = pid;
-        ReplayInvHolder holder = new ReplayInvHolder();
-        gui = Bukkit.createInventory(holder, 45, Component.text(replay.players().get(pid).name() + "'s inventory"));
-        holder.set(gui);
-        fillGui();
-        viewer.openInventory(gui);
+        int t = 0;
+        if (tab != null) {
+            switch (tab.toLowerCase(Locale.ROOT)) {
+                case "extra", "extrainv", "extra-inventory", "rank" -> t = 1;
+                case "ender", "enderchest", "ender-chest", "echest", "ec" -> t = 2;
+                case "inv", "inventory", "main" -> t = 0;
+                default -> {
+                    return "Unknown tab '" + tab + "'. Use inv, extra or ender.";
+                }
+            }
+        }
+        openInventoryOf(pid, t, 0);
         return null;
+    }
+
+    void openInventoryOf(int pid, int tab, int page) {
+        guiPid = pid;
+        guiTab = Math.max(0, Math.min(2, tab));
+        guiPage = tab == 1 ? Math.max(0, Math.min(1, page)) : 0;
+        ReplayInvHolder holder = new ReplayInvHolder(this);
+        Inventory next = Bukkit.createInventory(holder, 54,
+                Component.text(replay.players().get(pid).name() + " - " + TAB_NAME[guiTab]
+                        + (guiTab == 1 ? " (" + (guiPage + 1) + "/2)" : "")));
+        holder.set(next);
+        gui = next;
+        fillGui();
+        viewer.openInventory(next);
+    }
+
+    /** A click in the bottom row of the inventory window (tabs, pages, switch player, close). */
+    void invClick(int slot) {
+        if (gui == null || guiPid < 0) return;
+        int pid = guiPid;
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            if (!viewer.isOnline()) return;
+            switch (slot) {
+                case 45 -> openInventoryOf(pid, 0, 0);
+                case 46 -> openInventoryOf(pid, 1, 0);
+                case 47 -> openInventoryOf(pid, 2, 0);
+                case 49 -> openPlayersMenu(true);
+                case 51 -> {
+                    if (guiTab == 1) openInventoryOf(pid, 1, guiPage - 1);
+                }
+                case 52 -> {
+                    if (guiTab == 1) openInventoryOf(pid, 1, guiPage + 1);
+                }
+                case 53 -> viewer.closeInventory();
+                default -> {
+                    // an item slot: look only
+                }
+            }
+        });
     }
 
     private void updateGui() {
@@ -649,20 +750,245 @@ public final class PlaybackSession {
         if (guiDirty || (tickCount % 10) == 0) fillGui();
     }
 
+    private boolean hasItems(int pid, int from, int to) {
+        ItemStack[] a = inv.get(pid);
+        if (a == null) return false;
+        for (int i = from; i < to && i < a.length; i++) if (a[i] != null) return true;
+        return false;
+    }
+
+    private ItemStack tabButton(int tab, Material m, String name, int pid) {
+        ItemStack it = new ItemStack(m);
+        ItemMeta meta = it.getItemMeta();
+        boolean selected = guiTab == tab;
+        meta.displayName(Component.text(name, selected ? NamedTextColor.GREEN : NamedTextColor.GRAY, TextDecoration.BOLD)
+                .decoration(TextDecoration.ITALIC, false));
+        List<Component> lore = new ArrayList<>();
+        boolean any = switch (tab) {
+            case 0 -> true;
+            case 1 -> hasItems(pid, Recorder.SLOT_EXTRA, Recorder.INV_SLOTS);
+            default -> hasItems(pid, Recorder.SLOT_ENDER, Recorder.SLOT_EXTRA);
+        };
+        lore.add(Component.text(selected ? "Showing" : "Click to show", NamedTextColor.DARK_GRAY)
+                .decoration(TextDecoration.ITALIC, false));
+        if (!any) {
+            lore.add(Component.text("Nothing recorded (empty, an older replay,", NamedTextColor.RED)
+                    .decoration(TextDecoration.ITALIC, false));
+            lore.add(Component.text("or the plugin for it is not installed).", NamedTextColor.RED)
+                    .decoration(TextDecoration.ITALIC, false));
+        }
+        meta.lore(lore);
+        if (selected) meta.setEnchantmentGlintOverride(true);
+        it.setItemMeta(meta);
+        return it;
+    }
+
+    private static ItemStack button(Material m, String name, NamedTextColor color, String... lore) {
+        ItemStack it = new ItemStack(m);
+        ItemMeta meta = it.getItemMeta();
+        meta.displayName(Component.text(name, color).decoration(TextDecoration.ITALIC, false));
+        List<Component> l = new ArrayList<>();
+        for (String x : lore) l.add(Component.text(x, NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false));
+        meta.lore(l);
+        it.setItemMeta(meta);
+        return it;
+    }
+
     /**
-     * Lays the inventory out like a normal player inventory, with the real items only (no labels or filler):
-     * top row = armor (helmet to boots) and off hand, then the 27 storage slots, then the hotbar.
+     * The window shows the real items only in rows 1-5 (like a normal inventory: armor + off hand on top, 27 storage
+     * slots, hotbar; or the extra inventory / ender chest slots) and a bar of buttons in row 6.
      */
     private void fillGui() {
         guiDirty = false;
-        ItemStack[] a = inv.getOrDefault(guiPid, new ItemStack[41]);
-        gui.setItem(0, a[39]); // helmet
-        gui.setItem(1, a[38]); // chestplate
-        gui.setItem(2, a[37]); // leggings
-        gui.setItem(3, a[36]); // boots
-        gui.setItem(5, a[40]); // off hand
-        for (int i = 9; i < 36; i++) gui.setItem(i, a[i]); // storage
-        for (int i = 0; i < 9; i++) gui.setItem(36 + i, a[i]); // hotbar
+        gui.clear();
+        ItemStack[] a = inv.getOrDefault(guiPid, new ItemStack[Recorder.INV_SLOTS]);
+        switch (guiTab) {
+            case 0 -> {
+                gui.setItem(0, a[39]); // helmet
+                gui.setItem(1, a[38]); // chestplate
+                gui.setItem(2, a[37]); // leggings
+                gui.setItem(3, a[36]); // boots
+                gui.setItem(5, a[40]); // off hand
+                for (int i = 9; i < 36; i++) gui.setItem(i, a[i]); // storage
+                for (int i = 0; i < 9; i++) gui.setItem(36 + i, a[i]); // hotbar
+            }
+            case 1 -> {
+                for (int i = 0; i < 45; i++) {
+                    int idx = guiPage * 45 + i;
+                    if (idx >= 54) break; // the extra inventory has at most 54 slots
+                    gui.setItem(i, a[Recorder.SLOT_EXTRA + idx]);
+                }
+            }
+            default -> {
+                for (int i = 0; i < 27; i++) gui.setItem(i, a[Recorder.SLOT_ENDER + i]);
+            }
+        }
+        ItemStack filler = button(Material.GRAY_STAINED_GLASS_PANE, " ", NamedTextColor.DARK_GRAY);
+        for (int i = 45; i < 54; i++) gui.setItem(i, filler);
+        gui.setItem(45, tabButton(0, Material.CHEST, "Inventory", guiPid));
+        gui.setItem(46, tabButton(1, Material.SHULKER_BOX, "Extra inventory", guiPid));
+        gui.setItem(47, tabButton(2, Material.ENDER_CHEST, "Ender chest", guiPid));
+        gui.setItem(49, button(Material.PLAYER_HEAD, replay.players().get(guiPid).name(), NamedTextColor.AQUA,
+                "Click to pick another player"));
+        if (guiTab == 1) {
+            gui.setItem(51, button(Material.ARROW, "Previous page", NamedTextColor.YELLOW));
+            gui.setItem(52, button(Material.ARROW, "Next page", NamedTextColor.YELLOW));
+        }
+        gui.setItem(53, button(Material.BARRIER, "Close", NamedTextColor.RED));
+    }
+
+    // ------------------------------------------------------------ hotbar mode
+
+    public boolean controlsMode() {
+        return controlsMode;
+    }
+
+    private void clearSpectatorTarget() {
+        if (viewer.isOnline() && viewer.getGameMode() == GameMode.SPECTATOR) viewer.setSpectatorTarget(null);
+    }
+
+    /** Switch to hotbar mode: adventure mode + flight, with the control hotbar. The real inventory is saved first. */
+    public void enterControlsMode() {
+        if (controlsMode) return;
+        if (!Hotbar.backup(plugin, viewer)) {
+            viewer.sendMessage(Msg.err("Could not save your inventory, so the hotbar controls are off. Using spectator mode."));
+            return;
+        }
+        if (!flagsSaved) {
+            flagsSaved = true;
+            sAllowFlight = viewer.getAllowFlight();
+            sFlying = viewer.isFlying();
+            sInvulnerable = viewer.isInvulnerable();
+            sInvisible = viewer.isInvisible();
+            sCollidable = viewer.isCollidable();
+            sCanPickup = viewer.getCanPickupItems();
+            sAffectsSpawning = viewer.getAffectsSpawning();
+            sSleepIgnored = viewer.isSleepingIgnored();
+        }
+        clearSpectatorTarget();
+        attached = null;
+        viewer.setGameMode(GameMode.ADVENTURE);
+        viewer.setAllowFlight(true);
+        viewer.setFlying(true);
+        viewer.setInvulnerable(true);
+        viewer.setInvisible(true);
+        viewer.setCollidable(false);
+        viewer.setCanPickupItems(false);
+        viewer.setAffectsSpawning(false);
+        viewer.setSleepingIgnored(true);
+        controlsMode = true;
+        Hotbar.give(plugin, viewer, paused, speed);
+        shownPaused = paused;
+        shownSpeed = speed;
+        viewer.sendMessage(Msg.info("Hotbar controls are on: use the items in your hotbar. Sneak to leave first person."));
+    }
+
+    /** Back to plain spectator mode (fly through blocks, chat buttons). */
+    public void enterSpectatorMode() {
+        if (!controlsMode) return;
+        controlsMode = false;
+        Hotbar.removeItems(plugin, viewer);
+        viewer.setGameMode(GameMode.SPECTATOR);
+        viewer.sendMessage(Msg.info("Spectator mode: you can fly through blocks. Double-tap sneak to get the hotbar back."));
+        viewer.sendMessage(Component.empty()
+                .append(Msg.button("[Hotbar controls]", NamedTextColor.GREEN, "/replay hotbar", "Get the control hotbar back")));
+        sendControls();
+    }
+
+    /** Undoes everything hotbar mode changed: game mode, flight and other flags, and the real inventory. */
+    private void restoreViewerState() {
+        if (origMode != null) viewer.setGameMode(origMode);
+        if (flagsSaved) {
+            viewer.setAllowFlight(sAllowFlight);
+            viewer.setFlying(sFlying && sAllowFlight);
+            viewer.setInvulnerable(sInvulnerable);
+            viewer.setInvisible(sInvisible);
+            viewer.setCollidable(sCollidable);
+            viewer.setCanPickupItems(sCanPickup);
+            viewer.setAffectsSpawning(sAffectsSpawning);
+            viewer.setSleepingIgnored(sSleepIgnored);
+            flagsSaved = false;
+        }
+        controlsMode = false;
+        Hotbar.restore(plugin, viewer);
+    }
+
+    /** Keeps the play/pause and speed buttons in step with the real state. */
+    private void refreshHotbar() {
+        if (!controlsMode) return;
+        if (paused != shownPaused || speed != shownSpeed) {
+            shownPaused = paused;
+            shownSpeed = speed;
+            Hotbar.update(plugin, viewer, paused, speed);
+        }
+    }
+
+    /** Hotbar mode "follow": the camera is put at the player's eyes every tick (sneak to leave). */
+    private void followControls() {
+        if (followPid < 0) return;
+        if (viewer.isSneaking()) {
+            freeCam();
+            viewer.sendMessage(Msg.info("Free camera."));
+            return;
+        }
+        PState s = lastStates.get(followPid);
+        if (s == null) return;
+        World w = world(s.world());
+        if (w == null) return;
+        viewer.teleport(new Location(w, s.x(), s.y() + 1.62, s.z(), s.yaw(), s.pitch()));
+    }
+
+    /** The replay player the viewer is looking at (within 40 blocks), or -1. */
+    private int lookedAtPlayer() {
+        Map<UUID, Integer> byEntity = new HashMap<>();
+        for (Map.Entry<Integer, Entity> en : npcs.entrySet()) {
+            if (en.getValue() != null && en.getValue().isValid()) byEntity.put(en.getValue().getUniqueId(), en.getKey());
+        }
+        if (byEntity.isEmpty()) return -1;
+        var hit = viewer.getWorld().rayTraceEntities(viewer.getEyeLocation(), viewer.getEyeLocation().getDirection(),
+                40.0, 0.4, e -> byEntity.containsKey(e.getUniqueId()));
+        if (hit == null || hit.getHitEntity() == null) return -1;
+        return byEntity.getOrDefault(hit.getHitEntity().getUniqueId(), -1);
+    }
+
+    /** A click on a control item. right = right-click, otherwise left-click. */
+    void onControl(String id, boolean right) {
+        switch (id) {
+            case Hotbar.PLAY -> toggle();
+            case Hotbar.BACK -> seekRelativeSeconds(right ? -10 : -5);
+            case Hotbar.FWD -> seekRelativeSeconds(right ? 10 : 5);
+            case Hotbar.SPEED -> {
+                int at = 0;
+                for (int i = 0; i < SPEEDS.length; i++) {
+                    if (Math.abs(SPEEDS[i] - speed) < Math.abs(SPEEDS[at] - speed)) at = i;
+                }
+                int next = Math.max(0, Math.min(SPEEDS.length - 1, at + (right ? 1 : -1)));
+                setSpeed(SPEEDS[next]);
+            }
+            case Hotbar.PLAYERS -> openPlayersMenu(false);
+            case Hotbar.INV -> {
+                if (followPid >= 0) openInventoryOf(followPid, guiTab, 0);
+                else openPlayersMenu(true);
+            }
+            case Hotbar.INSPECT -> {
+                int pid = lookedAtPlayer();
+                if (pid < 0) {
+                    viewer.sendMessage(Msg.err("Look at a player first."));
+                } else if (!right) {
+                    openInventoryOf(pid, 0, 0);          // left-click: inventory
+                } else if (viewer.isSneaking()) {
+                    openInventoryOf(pid, 1, 0);          // sneak + right-click: extra inventory
+                } else {
+                    openInventoryOf(pid, 2, 0);          // right-click: ender chest
+                }
+            }
+            case Hotbar.NOCLIP -> enterSpectatorMode();
+            case Hotbar.EXIT -> Bukkit.getScheduler().runTask(plugin, () -> plugin.playback().stop(viewer, false));
+            default -> {
+                // unknown item
+            }
+        }
+        refreshHotbar();
     }
 
     // ------------------------------------------------------------ simulation
@@ -740,8 +1066,8 @@ public final class PlaybackSession {
                 if (!quiet) hitSounds(ev);
             }
             case Ev.INV -> {
-                if (ev.b() >= 0 && ev.b() < 41) {
-                    ItemStack[] a = inv.computeIfAbsent(ev.a(), k -> new ItemStack[41]);
+                if (ev.b() >= 0 && ev.b() < Recorder.INV_SLOTS) {
+                    ItemStack[] a = inv.computeIfAbsent(ev.a(), k -> new ItemStack[Recorder.INV_SLOTS]);
                     a[ev.b()] = decode(ev.data());
                     if (ev.a() == guiPid) guiDirty = true;
                     if (overheadInv) tagDirty.add(ev.a());
@@ -1138,7 +1464,7 @@ public final class PlaybackSession {
     }
 
     private void resetSim() {
-        if (viewer.isOnline()) viewer.setSpectatorTarget(null);
+        if (viewer.isOnline()) clearSpectatorTarget();
         attached = null;
         despawnAll();
         revertBlocks();

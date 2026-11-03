@@ -50,13 +50,18 @@ public final class RecordListener implements Listener {
         plugin.recorder().refresh(p);
         // If the server crashed while someone was watching a replay, give them their game mode back.
         String saved = p.getPersistentDataContainer().get(plugin.viewKey(), PersistentDataType.STRING);
-        if (saved != null && plugin.playback().get(p) == null) {
-            try {
-                p.setGameMode(GameMode.valueOf(saved));
-            } catch (IllegalArgumentException ignored) {
-                // keep whatever they have
+        boolean backup = com.pvpreplay.play.Hotbar.hasBackup(plugin, p.getUniqueId());
+        if ((saved != null || backup) && plugin.playback().get(p) == null) {
+            if (saved != null) {
+                try {
+                    p.setGameMode(GameMode.valueOf(saved));
+                } catch (IllegalArgumentException ignored) {
+                    // keep whatever they have
+                }
+                p.getPersistentDataContainer().remove(plugin.viewKey());
             }
-            p.getPersistentDataContainer().remove(plugin.viewKey());
+            // hotbar mode changed their flags and took their inventory: give everything back
+            com.pvpreplay.play.Hotbar.recover(plugin, p);
         }
     }
 

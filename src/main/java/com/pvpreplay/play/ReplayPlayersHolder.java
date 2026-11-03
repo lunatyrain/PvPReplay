@@ -7,10 +7,12 @@ import org.bukkit.inventory.InventoryHolder;
 public final class ReplayPlayersHolder implements InventoryHolder {
     private final PlaybackSession session;
     private final int[] pidAt;
+    private final boolean inspect;
     private Inventory inventory;
 
-    ReplayPlayersHolder(PlaybackSession session, int size) {
+    ReplayPlayersHolder(PlaybackSession session, int size, boolean inspect) {
         this.session = session;
+        this.inspect = inspect;
         this.pidAt = new int[size];
         java.util.Arrays.fill(pidAt, -1);
     }
@@ -26,6 +28,11 @@ public final class ReplayPlayersHolder implements InventoryHolder {
     /** The replay player shown in that slot, or -1 for an empty slot. */
     int pidAt(int slot) {
         return slot >= 0 && slot < pidAt.length ? pidAt[slot] : -1;
+    }
+
+    /** true: clicking a head opens that player's inventory instead of teleporting. */
+    boolean inspect() {
+        return inspect;
     }
 
     PlaybackSession session() {

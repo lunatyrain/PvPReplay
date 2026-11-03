@@ -18,6 +18,8 @@ import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Projectile;
 import org.bukkit.inventory.EquipmentSlot;
+import org.bukkit.inventory.Inventory;
+import org.bukkit.Material;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.PlayerInventory;
 import org.bukkit.potion.PotionEffect;
@@ -65,7 +67,10 @@ public final class Recorder {
     private Set<Integer> prevPresent = new HashSet<>();
     private final Map<Integer, ArrayDeque<Integer>> swings = new HashMap<>();
 
-    private static final int INV_SLOTS = 41;
+    // slot numbers in INV events: 0-40 player inventory, 41-67 ender chest, 68-121 RankedSMPX extra inventory
+    public static final int SLOT_ENDER = 41;
+    public static final int SLOT_EXTRA = 68;
+    public static final int INV_SLOTS = 122;
     private static final Set<String> SECRET_COMMANDS = Set.of("login", "l", "log", "register", "reg", "changepassword",
             "password", "passwd", "unregister", "authme", "2fa", "totp", "verify", "auth", "captcha");
     private static final Set<String> PRIVATE_COMMANDS = Set.of("msg", "tell", "w", "whisper", "m", "t", "r", "reply",
@@ -561,8 +566,16 @@ public final class Recorder {
 
         boolean scan = force || ((frameNo + pid) % 5 == 0);
         if (scan) {
+            Inventory ender = st.recordEnderChest ? p.getEnderChest() : null;
+            Inventory extra = st.recordExtraInventory ? ExtraInv.of(p.getUniqueId()) : null;
             for (int i = 0; i < INV_SLOTS; i++) {
-                ItemStack n = inv.getItem(i);
+                ItemStack n;
+                if (i < SLOT_ENDER) n = inv.getItem(i);
+                else if (i < SLOT_EXTRA) n = ender != null && i - SLOT_ENDER < ender.getSize() ? ender.getItem(i - SLOT_ENDER) : null;
+                else {
+                    n = extra != null && i - SLOT_EXTRA < extra.getSize() ? extra.getItem(i - SLOT_EXTRA) : null;
+                    if (n != null && n.getType() == Material.BARRIER) n = null; // locked-slot placeholder
+                }
                 if (sameStack(c.items[i], n)) continue;
                 if (isEmpty(n)) {
                     c.items[i] = null;

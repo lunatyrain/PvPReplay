@@ -33,6 +33,9 @@ public final class Settings {
     public boolean recordChat;
     public boolean recordCommands;
     public boolean recordVoice;
+    public boolean recordEnderChest;
+    public boolean recordExtraInventory;
+    public boolean hotbarControls;
     public boolean recordVoiceGroups;
     public boolean playVoice;
 
@@ -81,6 +84,9 @@ public final class Settings {
         recordChat = c.getBoolean("recording.chat", true);
         recordCommands = c.getBoolean("recording.commands", true);
         recordVoice = c.getBoolean("recording.voice", true);
+        recordEnderChest = c.getBoolean("recording.ender-chest", true);
+        recordExtraInventory = c.getBoolean("recording.extra-inventory", true);
+        hotbarControls = c.getBoolean("playback.hotbar-controls", true);
         recordVoiceGroups = c.getBoolean("recording.voice-groups", false);
         playVoice = c.getBoolean("playback.voice", true);
 

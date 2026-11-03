@@ -12,12 +12,13 @@ public final class InvGuiListener implements Listener {
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onClick(InventoryClickEvent e) {
         var holder = e.getInventory().getHolder();
-        if (holder instanceof ReplayInvHolder) {
+        if (holder instanceof ReplayInvHolder ih) {
             e.setCancelled(true);
+            if (e.getClickedInventory() == e.getInventory()) ih.session().invClick(e.getSlot());
         } else if (holder instanceof ReplayPlayersHolder ph) {
             e.setCancelled(true);
             // only clicks on the menu itself count, not on the viewer's own inventory below it
-            if (e.getClickedInventory() == e.getInventory()) ph.session().menuClick(e.getSlot());
+            if (e.getClickedInventory() == e.getInventory()) ph.session().menuClick(e.getSlot(), e.isRightClick());
         }
     }
 

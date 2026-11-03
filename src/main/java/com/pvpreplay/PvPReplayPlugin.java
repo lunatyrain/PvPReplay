@@ -1,6 +1,7 @@
 package com.pvpreplay;
 
 import com.pvpreplay.cmd.ReplayCommand;
+import com.pvpreplay.play.HotbarListener;
 import com.pvpreplay.play.InvGuiListener;
 import com.pvpreplay.play.ReplayEntityGuard;
 import com.pvpreplay.play.NpcFactory;
@@ -21,6 +22,7 @@ public final class PvPReplayPlugin extends JavaPlugin {
     private ReplayService service;
     private PlaybackManager playback;
     private NamespacedKey viewKey;
+    private NamespacedKey ctlKey;
     private VoiceBridge voice;
 
     @Override
@@ -29,6 +31,7 @@ public final class PvPReplayPlugin extends JavaPlugin {
         settings = new Settings();
         settings.load(getConfig());
         viewKey = new NamespacedKey(this, "viewing");
+        ctlKey = new NamespacedKey(this, "control");
 
         store = new ReplayStore(this, settings);
         recorder = new Recorder(this, settings);
@@ -37,6 +40,7 @@ public final class PvPReplayPlugin extends JavaPlugin {
 
         getServer().getPluginManager().registerEvents(new RecordListener(this), this);
         getServer().getPluginManager().registerEvents(new InvGuiListener(), this);
+        getServer().getPluginManager().registerEvents(new HotbarListener(this), this);
         ReplayEntityGuard guard = new ReplayEntityGuard(this);
         getServer().getPluginManager().registerEvents(guard, this);
         guard.registerOrbGuards();
@@ -113,6 +117,10 @@ public final class PvPReplayPlugin extends JavaPlugin {
 
     public PlaybackManager playback() {
         return playback;
+    }
+
+    public NamespacedKey ctlKey() {
+        return ctlKey;
     }
 
     public NamespacedKey viewKey() {
